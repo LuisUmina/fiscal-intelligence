@@ -1,13 +1,13 @@
 import requests
 from bs4 import BeautifulSoup
-from config.settings import SUNAT_CAPACIDAD_OPERATIVA
+from config.settings import SUNAT_SSCO_URL
 import pandas as pd
 from io import StringIO
 
 def _request_sunat_get(timeout=15):
     
     try:
-        r = requests.get(SUNAT_CAPACIDAD_OPERATIVA, timeout=timeout)
+        r = requests.get(SUNAT_SSCO_URL, timeout=timeout)
         r.raise_for_status()
         return r
 

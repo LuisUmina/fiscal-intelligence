@@ -1,6 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
-from config.settings import SUNAT_URL_CONSULTA, SUNAT_HEADERS
+from config.settings import SUNAT_RUC_LOOKUP_URL, SUNAT_REQUEST_HEADERS
 import pandas as pd
 from io import StringIO
 
@@ -9,7 +9,7 @@ _session = requests.Session()
 def _request_sunat_post(data, timeout=15):
     
     try:
-        r = _session.post(SUNAT_URL_CONSULTA, data=data, headers=SUNAT_HEADERS, timeout=timeout)
+        r = _session.post(SUNAT_RUC_LOOKUP_URL, data=data, headers=SUNAT_REQUEST_HEADERS, timeout=timeout)
         r.raise_for_status()
         return r
 

@@ -1,7 +1,7 @@
 import os
 from unittest import skip
 import pandas as pd
-from config.settings import TXT_FORMATS
+from config.settings import TXT_FILE_FORMATS
 
 def get_txt_format_type(filename):
     #print(f"Archivo: {filename}")
@@ -32,7 +32,7 @@ def get_txt_format_type(filename):
 
 def extract_rucs_from_file(filepath, tipo):
     # Traer caracteristicas del tipo de archivo
-    config = TXT_FORMATS[tipo]
+    config = TXT_FILE_FORMATS[tipo]
     delimiter = config["txt_delimiter"]
     ruc_column = config["ruc_column"] - 1
     has_header = config["has_header"]

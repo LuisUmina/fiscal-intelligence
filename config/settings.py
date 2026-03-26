@@ -1,24 +1,24 @@
-# Lectura de TXTs
-# Tipo 801: TABERNERO PLE - Sin cabeceras - RUC en columna 12
-# Tipo 804: CONSORCIO SAN JOSE SIRE - Con cabeceras - RUC en columna 13
-TXT_FORMATS = {
+# TXT parsing formats
+# Type 801: TABERNERO PLE - no header row - RUC in column 12
+# Type 804: CONSORCIO SAN JOSE SIRE - with header row - RUC in column 13
+TXT_FILE_FORMATS = {
     "801": {"ruc_column": 12, "has_header": False, "txt_delimiter": "|"},
     "804": {"ruc_column": 13, "has_header": True, "txt_delimiter": "|"},
     "ruc_maestro": {"ruc_column": 1, "has_header": False, "txt_delimiter": "\t"},
 }
 
 
-# Consulta RUC SUNAT - REQUEST
-SUNAT_URL_CONSULTA = "https://e-consultaruc.sunat.gob.pe/cl-ti-itmrconsruc/jcrS00Alias" # Request and Scraping
+# SUNAT RUC lookup - REQUEST
+SUNAT_RUC_LOOKUP_URL = "https://e-consultaruc.sunat.gob.pe/cl-ti-itmrconsruc/jcrS00Alias" # Request and Scraping
 
-SUNAT_HEADERS = {
+SUNAT_REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0",
     "Content-Type": "application/x-www-form-urlencoded",
     "Referer": "https://e-consultaruc.sunat.gob.pe/"
 }
 
-# Consulta RUC SUNAT - SCRAPING
-SUNAT_FIELD_MAPEO = {
+# SUNAT RUC lookup - SCRAPING
+SUNAT_FIELD_MAPPING = {
     "Número de RUC": "ruc_sunat",
     "Tipo Contribuyente": "tipo_contribuyente",
     "Nombre Comercial": "nombre_comercial",
@@ -40,5 +40,5 @@ SUNAT_FIELD_MAPEO = {
     "Fecha consulta":"fecha_consulta_sunat",
 }
 
-# Consulta Sujetos Sin Capacidad Operativa
-SUNAT_CAPACIDAD_OPERATIVA = "https://www.sunat.gob.pe/padronesnotificaciones/sujeSinCapacidadOperativa.html"
+# SUNAT list of entities without operational capacity (SSCO)
+SUNAT_SSCO_URL = "https://www.sunat.gob.pe/padronesnotificaciones/sujeSinCapacidadOperativa.html"
