@@ -1,5 +1,5 @@
 # Configuración de branding (permite versiones locales)
-#config/branding.py
+config/branding.py
 
 # Ejecutables y binarios
 ejecutable.bat
