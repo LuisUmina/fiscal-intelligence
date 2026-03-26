@@ -7,6 +7,7 @@ from src.extractors.sunat_consulta_ruc_request import (
     consultar_establecimientos,
     consultar_representantes_legales,
     consultar_trabajadores,
+    consultar_informacion_historica
 )
 from src.extractors.sunat_ssco import consultar_sujetos_sin_capacidad
 from src.extractors.txt_parser import extract_rucs_from_folder
@@ -65,6 +66,9 @@ def ejecutar_pipeline_sunat(
     reps = []
     trabs = []
     ests = []
+    hist_company_name = []
+    hist_taxpayer_status = []
+    hist_fiscal_address = []
 
     # Paso 1 - Lectura de TXT
     _emit(emit, "pipe", "s1", "running")
@@ -99,6 +103,9 @@ def ejecutar_pipeline_sunat(
             "representantes": reps,
             "trabajadores": trabs,
             "establecimientos": ests,
+            "hist_company_name": hist_company_name,
+            "hist_taxpayer_status": hist_taxpayer_status,
+            "hist_fiscal_address": hist_fiscal_address,
             "rucs_archivos": rucs_archivos,
             "errores_txt": errores_txt,
             "ssco": {"status": "no_data", "tablas": []},
@@ -127,6 +134,9 @@ def ejecutar_pipeline_sunat(
                 "representantes": reps,
                 "trabajadores": trabs,
                 "establecimientos": ests,
+                "hist_company_name": hist_company_name,
+                "hist_taxpayer_status": hist_taxpayer_status,
+                "hist_fiscal_address": hist_fiscal_address,
                 "rucs_archivos": rucs_archivos,
                 "errores_txt": errores_txt,
                 "ssco": {"status": "no_data", "tablas": []},
@@ -190,6 +200,66 @@ def ejecutar_pipeline_sunat(
             _emit(emit, "kpi", "ok", str(ok_c))
             _emit(emit, "kpi", "err", str(err_c))
 
+        # Consulta histórica (3 subtablas)
+        resp_hist = consultar_informacion_historica(ruc)
+        if resp_hist["status"] == "ok":
+            tablas_hist = resp_hist.get("tablas", {})
+            hist_company_name.extend(tablas_hist.get("hist_company_name", []))
+            hist_taxpayer_status.extend(tablas_hist.get("hist_taxpayer_status", []))
+            hist_fiscal_address.extend(tablas_hist.get("hist_fiscal_address", []))
+            ok_c += 1
+        elif resp_hist["status"] == "no_data":
+            hist_company_name.append(
+                {
+                    "ruc": ruc,
+                    "nombre_razon_social": "SIN_DATOS",
+                    "fecha_baja": "",
+                }
+            )
+            hist_taxpayer_status.append(
+                {
+                    "ruc": ruc,
+                    "condicion_contribuyente": "SIN_DATOS",
+                    "fecha_desde": "",
+                    "fecha_hasta": "",
+                }
+            )
+            hist_fiscal_address.append(
+                {
+                    "ruc": ruc,
+                    "domicilio_fiscal": "SIN_DATOS",
+                    "fecha_baja": "",
+                }
+            )
+            err_c += 1
+        else:
+            hist_company_name.append(
+                {
+                    "ruc": ruc,
+                    "nombre_razon_social": "ERROR",
+                    "fecha_baja": "",
+                }
+            )
+            hist_taxpayer_status.append(
+                {
+                    "ruc": ruc,
+                    "condicion_contribuyente": "ERROR",
+                    "fecha_desde": "",
+                    "fecha_hasta": "",
+                }
+            )
+            hist_fiscal_address.append(
+                {
+                    "ruc": ruc,
+                    "domicilio_fiscal": "ERROR",
+                    "fecha_baja": "",
+                }
+            )
+            err_c += 1
+
+        _emit(emit, "kpi", "ok", str(ok_c))
+        _emit(emit, "kpi", "err", str(err_c))
+
     _emit(emit, "pipe", "s4", "ok")
     _emit(
         emit,
@@ -218,11 +288,14 @@ def ejecutar_pipeline_sunat(
             ests,
             f"{carpeta_output}/DATOS_RUC.xlsx",
             rucs_archivos=rucs_archivos,
+            hist_company_name=hist_company_name,
+            hist_taxpayer_status=hist_taxpayer_status,
+            hist_fiscal_address=hist_fiscal_address,
         )
         _emit(
             emit,
             "log",
-            "[OK] DATOS_RUC.xlsx generado (hojas: Representantes, Trabajadores, Establecimientos).",
+            "[OK] DATOS_RUC.xlsx generado (hojas: Representantes, Trabajadores, Establecimientos, Hist_RazonSocial, Hist_Condicion, Hist_Domicilio).",
             "ok",
         )
 
@@ -244,6 +317,9 @@ def ejecutar_pipeline_sunat(
         "representantes": reps,
         "trabajadores": trabs,
         "establecimientos": ests,
+        "hist_company_name": hist_company_name,
+        "hist_taxpayer_status": hist_taxpayer_status,
+        "hist_fiscal_address": hist_fiscal_address,
         "rucs_archivos": rucs_archivos,
         "errores_txt": errores_txt,
         "ssco": ssco,

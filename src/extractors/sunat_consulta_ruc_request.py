@@ -182,15 +182,10 @@ def consultar_establecimientos(ruc):
     for fila in tabla.find("tbody").find_all("tr"):
         columnas = fila.find_all("td")
 
-        #codigo =                columnas[0].text.strip()
-        #tipo_establecimiento =  columnas[1].text.strip()
-        #direccion =             columnas[2].text.strip()
-        #actividad_economica  =  columnas[3].text.strip()
-
-        codigo = " ".join(columnas[0].get_text().split())
-        tipo_establecimiento = " ".join(columnas[1].get_text().split())
-        direccion = " ".join(columnas[2].get_text().split())
-        actividad_economica = " ".join(columnas[3].get_text().split())
+        codigo =                " ".join(columnas[0].get_text().split())
+        tipo_establecimiento =  " ".join(columnas[1].get_text().split())
+        direccion =             " ".join(columnas[2].get_text().split())
+        actividad_economica =   " ".join(columnas[3].get_text().split())
 
         resultados.append({
             "ruc": ruc,
@@ -202,7 +197,100 @@ def consultar_establecimientos(ruc):
     
     return {"status": "ok", "mensaje": "", "tablas": resultados}
 
-"""
+
+# Apartado: Infotmacion Historica
+def consultar_informacion_historica(ruc):
+    """Apartado Informacion Historica (accion getinfHis)."""
+    
+    # Datos del formulario
+    data = {
+        "accion": "getinfHis",
+        "contexto": "ti-it",
+        "modo": "1",
+        "desRuc": "",
+        "nroRuc": ruc,
+    }
+
+    # Request
+    response = _request_sunat_post(data)
+    if response is None:
+        return {"status": "error", "mensaje": "request_failed", "tablas": []}
+
+    #print(response.text)
+
+    # Hay este apartado ?
+    texto = response.text.lower()
+    if  "Pagina de Error".lower() in texto:
+        print(f" - [...] Apartado de INFORMACION HISTORICA no disponible para el RUC: {ruc}")
+        return {"status": "no_data", "mensaje": "apartado_no_disponible", "tablas": []}
+
+    # BeautifulSoup 
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    # Validacion de tabla
+    tablas = soup.find_all("table", class_="table")
+    if len(tablas) < 3:
+        return {"status": "error", "mensaje": "q_tablas_no_encontrada", "tablas": []}
+
+    # Tabla Interna: 1
+    resultados_table_1 = []
+
+    for fila in tablas[0].find("tbody").find_all("tr"):
+        columnas = fila.find_all("td")
+
+        nombre_razon_social =   " ".join(columnas[0].get_text().split())
+        fecha_baja_1 =          " ".join(columnas[1].get_text().split())
+
+        resultados_table_1.append({
+            "ruc": ruc,
+            "nombre_razon_social": nombre_razon_social,
+            "fecha_baja": fecha_baja_1,
+        })
+
+    # Tabla Interna: 2
+    resultados_table_2 = []
+
+    for fila in tablas[1].find("tbody").find_all("tr"):
+        columnas = fila.find_all("td")
+
+        condicion_contribuyente =   " ".join(columnas[0].get_text().split())
+        fecha_desde =               " ".join(columnas[1].get_text().split())
+        fecha_hasta =               " ".join(columnas[2].get_text().split())
+
+        resultados_table_2.append({
+            "ruc": ruc,
+            "condicion_contribuyente": condicion_contribuyente,
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+        })
+
+    # Tabla Interna: 3
+    resultados_table_3 = []
+
+    for fila in tablas[2].find("tbody").find_all("tr"):
+        columnas = fila.find_all("td")
+
+        domicilio_fiscal =  " ".join(columnas[0].get_text().split())
+        fecha_baja_3 =      " ".join(columnas[1].get_text().split())
+
+        resultados_table_3.append({
+            "ruc": ruc,
+            "domicilio_fiscal": domicilio_fiscal,
+            "fecha_baja": fecha_baja_3,
+        })
+
+    return {
+    "status": "ok",
+    "mensaje": "",
+    "tablas": {
+        "hist_company_name": resultados_table_1,
+        "hist_taxpayer_status": resultados_table_2,
+        "hist_fiscal_address": resultados_table_3,
+    },
+}
+
+
+
 if __name__ == "__main__":
     ruc = "20505670443" # CONTIENE LOS 3  - Validado
     #ruc = "10101348763" # SIN REPRESENTANTES LEGALES - Validado
@@ -212,16 +300,17 @@ if __name__ == "__main__":
     # Carga de cookies
     _warmup_sesion(ruc)
 
-    print("\n SUNAT GENERAL \n")
-    consultar_general(ruc)
+    #print("\n REPRESENTANTES LEGALES \n")
+    #consultar_representantes_legales(ruc)
 
-    print("\n REPRESENTANTES LEGALES \n")
-    consultar_representantes_legales(ruc)
+    #print("\n TRABAJADORES \n")
+    #consultar_trabajadores(ruc)
 
-    print("\n TRABAJADORES \n")
-    consultar_trabajadores(ruc)
+    #print("\n ESTABLECIMIENTOS \n")
+    #consultar_establecimientos(ruc)
 
-    print("\n ESTABLECIMIENTOS \n")
-    consultar_establecimientos(ruc)
-"""
+    print("\n INFORMACION HISTORICA \n")
+    consultar_informacion_historica(ruc)
+
+
 
