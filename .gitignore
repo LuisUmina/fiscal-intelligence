@@ -1,0 +1,31 @@
+# Configuración de branding (permite versiones locales)
+#config/branding.py
+
+# Ejecutables y binarios
+ejecutable.bat
+SUNAT-Analytics_v4.exe
+*.exe
+*.bat
+
+# Datos de entrada/salida (pruebas internas)
+input/
+output/
+
+# Datos privados
+.otros/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
