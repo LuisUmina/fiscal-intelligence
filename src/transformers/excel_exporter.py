@@ -25,6 +25,7 @@ def exportar_ruc_a_excel_por_hojas(
     ests,
     ruta_salida,
     rucs_archivos=None,
+    scraper_general=None,
     hist_company_name=None,
     hist_taxpayer_status=None,
     hist_fiscal_address=None,
@@ -43,6 +44,9 @@ def exportar_ruc_a_excel_por_hojas(
             ("Trabajadores", trabs),
             ("Establecimientos", ests),
         ]
+
+        if scraper_general is not None:
+            hojas.append(("Scraper_General", scraper_general))
 
         if hist_company_name is not None:
             hojas.append(("Hist_RazonSocial", hist_company_name))

@@ -5,7 +5,12 @@ def init_browser():
     """Initialize browser once; reusable for batch processing."""
 
     p = sync_playwright().start()
-    browser = p.chromium.launch(channel="chrome", headless=False)
+    browser = p.chromium.launch(
+        channel="chrome", 
+        headless=False,
+        args=["--window-position=9999,9999"]
+        )
+    
     page = browser.new_page()
     page.on("dialog", handle_dialog)
     return p, browser, page

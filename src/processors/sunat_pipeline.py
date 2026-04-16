@@ -7,7 +7,12 @@ from src.extractors.sunat_consulta_ruc_request import (
     consultar_establecimientos,
     consultar_representantes_legales,
     consultar_trabajadores,
-    consultar_informacion_historica
+    consultar_informacion_historica,
+)
+from src.extractors.sunat_ruc_scraper import (
+    close_browser,
+    fetch_general_company_info,
+    init_browser,
 )
 from src.extractors.sunat_ssco import consultar_sujetos_sin_capacidad
 from src.extractors.txt_parser import extract_rucs_from_folder
@@ -66,6 +71,7 @@ def ejecutar_pipeline_sunat(
     reps = []
     trabs = []
     ests = []
+    scraper_general = []
     hist_company_name = []
     hist_taxpayer_status = []
     hist_fiscal_address = []
@@ -103,6 +109,7 @@ def ejecutar_pipeline_sunat(
             "representantes": reps,
             "trabajadores": trabs,
             "establecimientos": ests,
+            "scraper_general": scraper_general,
             "hist_company_name": hist_company_name,
             "hist_taxpayer_status": hist_taxpayer_status,
             "hist_fiscal_address": hist_fiscal_address,
@@ -120,6 +127,15 @@ def ejecutar_pipeline_sunat(
     _emit(emit, "log", "[INFO] Sesion SUNAT inicializada.", "info")
     _emit(emit, "pipe", "s3", "ok")
 
+    # Inicialización de navegador para scraper de información general
+    pw, browser, page = None, None, None
+    try:
+        pw, browser, page = init_browser()
+        _emit(emit, "log", "[INFO] Navegador de scraping inicializado.", "info")
+    except Exception as exc:
+        _emit(emit, "log", f"[WARN] Scraper no disponible: {exc}", "warn")
+        pw, browser, page = None, None, None
+
     # Paso 4 - Consulta masiva
     _emit(emit, "pipe", "s4", "running")
     _emit(emit, "log", f"[INFO] Iniciando consulta masiva: {len(rucs)} RUCs", "info")
@@ -128,12 +144,19 @@ def ejecutar_pipeline_sunat(
     for i, ruc in enumerate(rucs, 1):
         if should_stop():
             _emit(emit, "log", "[STOP] Proceso detenido.", "warn")
+            if pw is not None and browser is not None:
+                try:
+                    close_browser(pw, browser)
+                    _emit(emit, "log", "[INFO] Navegador de scraping cerrado.", "info")
+                except Exception as exc:
+                    _emit(emit, "log", f"[WARN] No se pudo cerrar navegador scraper: {exc}", "warn")
             return {
                 "status": "stopped",
                 "stopped": True,
                 "representantes": reps,
                 "trabajadores": trabs,
                 "establecimientos": ests,
+                "scraper_general": scraper_general,
                 "hist_company_name": hist_company_name,
                 "hist_taxpayer_status": hist_taxpayer_status,
                 "hist_fiscal_address": hist_fiscal_address,
@@ -195,6 +218,26 @@ def ejecutar_pipeline_sunat(
                 err_c += 1
             else:
                 target_list.append(_to_error_row(row_vacio))
+                err_c += 1
+
+            _emit(emit, "kpi", "ok", str(ok_c))
+            _emit(emit, "kpi", "err", str(err_c))
+
+        # Consulta general SUNAT vía scraper (Playwright)
+        if page is not None:
+            resp_scraper = fetch_general_company_info(page, ruc)
+            if resp_scraper["status"] == "ok":
+                data_scraper = resp_scraper.get("tablas", {})
+                if isinstance(data_scraper, dict):
+                    scraper_general.append(data_scraper)
+                else:
+                    scraper_general.append({"ruc": ruc, "estado_scraper": "FORMATO_INVALIDO"})
+                ok_c += 1
+            elif resp_scraper["status"] == "no_data":
+                scraper_general.append({"ruc": ruc, "estado_scraper": "SIN_DATOS"})
+                err_c += 1
+            else:
+                scraper_general.append({"ruc": ruc, "estado_scraper": "ERROR"})
                 err_c += 1
 
             _emit(emit, "kpi", "ok", str(ok_c))
@@ -288,6 +331,7 @@ def ejecutar_pipeline_sunat(
             ests,
             f"{carpeta_output}/DATOS_RUC.xlsx",
             rucs_archivos=rucs_archivos,
+            scraper_general=scraper_general,
             hist_company_name=hist_company_name,
             hist_taxpayer_status=hist_taxpayer_status,
             hist_fiscal_address=hist_fiscal_address,
@@ -295,7 +339,7 @@ def ejecutar_pipeline_sunat(
         _emit(
             emit,
             "log",
-            "[OK] DATOS_RUC.xlsx generado (hojas: Representantes, Trabajadores, Establecimientos, Hist_RazonSocial, Hist_Condicion, Hist_Domicilio).",
+            "[OK] DATOS_RUC.xlsx generado (hojas: Representantes, Trabajadores, Establecimientos, Scraper_General, Hist_RazonSocial, Hist_Condicion, Hist_Domicilio).",
             "ok",
         )
 
@@ -311,12 +355,20 @@ def ejecutar_pipeline_sunat(
 
         _emit(emit, "pipe", "s6", "ok")
 
+    if pw is not None and browser is not None:
+        try:
+            close_browser(pw, browser)
+            _emit(emit, "log", "[INFO] Navegador de scraping cerrado.", "info")
+        except Exception as exc:
+            _emit(emit, "log", f"[WARN] No se pudo cerrar navegador scraper: {exc}", "warn")
+
     return {
         "status": "ok",
         "stopped": False,
         "representantes": reps,
         "trabajadores": trabs,
         "establecimientos": ests,
+        "scraper_general": scraper_general,
         "hist_company_name": hist_company_name,
         "hist_taxpayer_status": hist_taxpayer_status,
         "hist_fiscal_address": hist_fiscal_address,

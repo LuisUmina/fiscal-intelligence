@@ -6,6 +6,8 @@ UI principal de SUNAT Analytics
 import os
 import time
 import queue
+import subprocess
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +24,7 @@ from config.branding import (
 #from src.transformers.excel_exporter import exportar_lista_a_excel, exportar_ruc_a_excel_por_hojas
 #from src.transformers.preparar_ssco import preparar_ssco_tablas
 #from src.extractors.txt_parser import extract_rucs_from_folder
-from src.processors import ejecutar_pipeline_sunat # >>
+from src.processors import construir_base_bi_basica, ejecutar_pipeline_sunat # >>
 
 # ──────────────────────────────────────────────
 #  Tema y paleta
@@ -69,6 +71,7 @@ class SunatApp(ctk.CTk):
         self._thread = None
         self._stop   = False
         self._kpi    = {}
+        self._legacy_proc = None
 
         self.v_input  = tk.StringVar(value=str(Path("input/txt_files").resolve()))
         self.v_output = tk.StringVar(value=str(Path("output/excel").resolve()))
@@ -227,12 +230,28 @@ class SunatApp(ctk.CTk):
             command=self._request_stop)
         self._btn_stop.pack(fill="x")
 
+        self._btn_legacy = ctk.CTkButton(
+            scrl, text="Abrir bot legacy",
+            height=36, font=FONT_BODY,
+            fg_color="#E2E8F0", hover_color="#CBD5E1",
+            text_color=PW_TEXT,
+            command=self._launch_legacy_bot)
+        self._btn_legacy.pack(fill="x", pady=(8, 0))
+
+        self._btn_bi = ctk.CTkButton(
+            scrl, text="Generar base BI",
+            height=36, font=FONT_BODY,
+            fg_color="#E2E8F0", hover_color="#CBD5E1",
+            text_color=PW_TEXT,
+            command=self._build_bi_base)
+        self._btn_bi.pack(fill="x", pady=(8, 0))
+
         self._divider(scrl)
 
         # Archivos que se generaran (compacto)
         self._section_title(scrl, "Archivos que se generaran")
         outputs = [
-            ("DATOS_RUC.xlsx",                       "Representantes, Trabajadores, Establecimientos y RUCs Únicos (4 hojas)"),
+            ("DATOS_RUC.xlsx",                       "Representantes, Trabajadores, Establecimientos, Información Historica (Razón Social - Condición - Domicilio) y RUCs Únicos (7 hojas)"),
             ("Sujetos sin capacidad operativa.xlsx", "Padron SSCO completo"),
         ]
         for fname, desc in outputs:
@@ -437,161 +456,93 @@ class SunatApp(ctk.CTk):
         self._stop = True
         self._log("[STOP] Detencion solicitada por el usuario.", "warn")
 
+    def _launch_legacy_bot(self):
+        repo_root = Path(__file__).resolve().parent
+        legacy_bot = repo_root / "tools" / "legacy" / "bot.py"
+        excel_path = Path(self.v_output.get().strip()) / "DATOS_RUC.xlsx"
+
+        if not legacy_bot.exists():
+            messagebox.showerror("Error", f"No se encontro el bot legacy en:\n{legacy_bot}")
+            return
+
+        if not excel_path.exists():
+            messagebox.showerror("Error", f"No se encontro el Excel esperado en:\n{excel_path}")
+            return
+
+        try:
+            kwargs = {
+                "cwd": str(repo_root),
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,
+                "text": True,
+                "bufsize": 1,
+            }
+            if os.name == "nt":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+            self._legacy_proc = subprocess.Popen([
+                sys.executable,
+                str(legacy_bot),
+                "--excel-path",
+                str(excel_path),
+                "--project-name",
+                "legacy_temp",
+            ], **kwargs)
+
+            self._log("[INFO] Bot legacy lanzado en proceso separado.", "info")
+            self._log("[INFO] Capturando salida del bot legacy en tiempo real...", "info")
+
+            threading.Thread(
+                target=self._read_legacy_output,
+                daemon=True,
+            ).start()
+        except Exception as exc:
+            messagebox.showerror("Error", f"No se pudo abrir el bot legacy:\n{exc}")
+
+    def _read_legacy_output(self):
+        proc = self._legacy_proc
+        if proc is None or proc.stdout is None:
+            return
+
+        try:
+            for raw_line in proc.stdout:
+                line = raw_line.rstrip()
+                if line:
+                    self._log(f"[LEGACY] {line}", "info")
+
+            return_code = proc.wait()
+            if return_code == 0:
+                self._log("[INFO] Bot legacy finalizo correctamente.", "ok")
+            else:
+                self._log(f"[WARN] Bot legacy termino con codigo {return_code}.", "warn")
+        except Exception as exc:
+            self._log(f"[WARN] No se pudo leer la salida del bot legacy: {exc}", "warn")
+
+    def _build_bi_base(self):
+        if self._thread and self._thread.is_alive():
+            messagebox.showwarning("En ejecucion", "Espera a que termine el proceso actual.")
+            return
+
+        out = self.v_output.get().strip()
+        if not out or not os.path.isdir(out):
+            messagebox.showerror("Error", "La carpeta de salida no es valida.")
+            return
+
+        try:
+            self._log("[INFO] Generando BASE_BI.xlsx desde DATOS_RUC.xlsx y RUCs_Consolidado.xlsx...", "info")
+            resumen = construir_base_bi_basica(out)
+            self._log(
+                f"[OK] Base BI generada: {resumen['archivo_salida']} | RUCs: {resumen['total_rucs']} | Coincidencias: {resumen['coincidencias_correctos']}",
+                "ok",
+            )
+            messagebox.showinfo("Base BI", "BASE_BI.xlsx generado correctamente.")
+        except Exception as exc:
+            self._log(f"[ERROR] No se pudo generar la base BI: {exc}", "error")
+            messagebox.showerror("Error", f"No se pudo generar BASE_BI.xlsx:\n{exc}")
+
     # ══════════════════════════════════════════
     #  PIPELINE DE EJECUCION
     # ══════════════════════════════════════════
-    """
-    def _run(self, inp, out):
-        t0 = time.time()
-        ok_c = err_c = 0
-
-        try:
-            from src.extractors.txt_parser import extract_rucs_from_folder
-            from src.extractors.sunat_consulta_ruc_request import (
-                _warmup_sesion,
-                consultar_representantes_legales,
-                consultar_trabajadores,
-                consultar_establecimientos,
-            )
-            from src.extractors.sunat_ssco import consultar_sujetos_sin_capacidad
-
-            # Paso 1 - Lectura de TXT
-            self._pipe_state("s1", "running")
-            self._step("Leyendo archivos TXT...", 0.04)
-            self._log(f"[INFO] Carpeta de entrada: {inp}", "info")
-
-            txt_files = [f for f in os.listdir(inp) if f.lower().endswith(".txt")]
-            self._set_kpi("txt", len(txt_files))
-            self._log(f"[INFO] TXT encontrados: {len(txt_files)}", "info")
-            self._pipe_state("s1", "ok")
-
-            # Paso 2 - Extraccion de RUCs
-            self._pipe_state("s2", "running")
-            self._step("Extrayendo RUCs de los TXT...", 0.08)
-
-            rucs, rucs_archivos, errores_txt = extract_rucs_from_folder(inp)
-            self._set_kpi("rucs", len(rucs))
-            self._log(f"[INFO] RUCs unicos extraidos: {len(rucs)}", "info")
-
-            # Mostrar en pantalla los TXT que fallaron (sin logs a archivo)
-            for item in errores_txt:
-                archivo = item.get("archivo", "")
-                error_txt = item.get("error", "")
-                self._log(f"[WARN] TXT omitido: {archivo} | {error_txt}", "warn")
-
-            self._pipe_state("s2", "ok")
-
-            if not rucs:
-                self._log("[WARN] No se encontraron RUCs para procesar.", "warn")
-                self._finish(False)
-                return
-
-            # Paso 3 - Warmup
-            self._pipe_state("s3", "running")
-            self._step("Inicializando sesion SUNAT...", 0.12)
-            _warmup_sesion(rucs[0])
-            self._log("[INFO] Sesion SUNAT inicializada.", "info")
-            self._pipe_state("s3", "ok")
-
-            # Paso 4 - Consulta masiva
-            self._pipe_state("s4", "running")
-            self._log(f"[INFO] Iniciando consulta masiva: {len(rucs)} RUCs", "info")
-
-            reps, trabs, ests = [], [], []
-            total = len(rucs)
-
-            for i, ruc in enumerate(rucs, 1):
-                if self._stop:
-                    self._log("[STOP] Proceso detenido.", "warn")
-                    self._finish(False)
-                    return
-
-                prog = 0.12 + (i / total) * 0.60
-                self._step(f"Consultando SUNAT  {i} de {total}  |  RUC {ruc}", prog)
-                _warmup_sesion(ruc)
-
-                consultas = [
-                    (consultar_representantes_legales, reps,
-                     {"ruc": ruc, "documento": "SIN_DATOS",
-                      "nro_documento": "", "nombre": "", "cargo": "", "fecha_desde": ""}),
-                    (consultar_trabajadores, trabs,
-                     {"ruc": ruc, "periodo": "SIN_DATOS",
-                      "nro_trabajadores": "", "nro_pensionistas": "",
-                      "nro_prestadores_servicios": ""}),
-                    (consultar_establecimientos, ests,
-                     {"ruc": ruc, "codigo": "SIN_DATOS",
-                      "tipo_establecimiento": "", "direccion": "",
-                      "actividad_economica": ""}),
-                ]
-
-                for fn, lst, row_vacio in consultas:
-                    resp = fn(ruc)
-                    if resp["status"] == "ok":
-                        lst.extend(resp["tablas"])
-                        ok_c += 1
-                    elif resp["status"] == "no_data":
-                        lst.append(row_vacio)
-                        err_c += 1
-                    else:
-                        # request_failed / error conexión u otros errores.
-                        # Mantenemos la estructura, pero marcamos el campo "SIN_DATOS" como "ERROR".
-                        row = dict(row_vacio)
-                        if "documento" in row:
-                            row["documento"] = "ERROR"
-                        elif "periodo" in row:
-                            row["periodo"] = "ERROR"
-                        elif "codigo" in row:
-                            row["codigo"] = "ERROR"
-                        lst.append(row)
-                        err_c += 1
-                    self._set_kpi("ok", ok_c)
-                    self._set_kpi("err", err_c)
-
-            self._pipe_state("s4", "ok")
-            self._log(f"[OK] Consulta masiva completada. Correctas: {ok_c} | Sin datos o error: {err_c}", "ok")
-
-            # Paso 5 - Padron SSCO
-            self._pipe_state("s5", "running")
-            self._step("Descargando padron SSCO...", 0.78)
-            self._log("[INFO] Descargando Sujetos sin Capacidad Operativa...", "info")
-            ssco = consultar_sujetos_sin_capacidad()
-            self._pipe_state("s5", "ok" if ssco["status"] == "ok" else "warn")
-
-            # Paso 6 - Exportacion
-            self._pipe_state("s6", "running")
-            self._step("Exportando archivos Excel...", 0.90)
-            self._log(f"[INFO] Guardando en: {out}", "info")
-
-            Path(out).mkdir(parents=True, exist_ok=True)
-
-            exportar_ruc_a_excel_por_hojas(reps, trabs, ests, f"{out}/DATOS_RUC.xlsx", rucs_archivos=rucs_archivos)
-            self._log("[OK] DATOS_RUC.xlsx generado (hojas: Representantes, Trabajadores, Establecimientos).", "ok")
-
-            if ssco["status"] == "ok":
-                tablas_preparadas = preparar_ssco_tablas(ssco["tablas"])
-                exportar_lista_a_excel(tablas_preparadas,
-                    f"{out}/Sujetos sin capacidad operativa.xlsx")
-                self._log("[OK] Sujetos sin capacidad operativa.xlsx generado.", "ok")
-            else:
-                self._log("[WARN] No se pudo descargar el padron SSCO.", "warn")
-
-            self._pipe_state("s6", "ok")
-
-            elapsed = time.time() - t0
-            mins = int(elapsed // 60)
-            secs = int(elapsed % 60)
-            self._log(
-                f"[DONE] Proceso completado en {mins}m {secs}s  |  "
-                f"Correctas: {ok_c}  |  Sin datos o error: {err_c}", "ok")
-            self._finish(True)
-
-        except Exception as exc:
-            import traceback
-            self._log(f"[ERROR] Error critico: {exc}", "error")
-            self._log(f"[ERROR] Detalle: {traceback.format_exc()}", "error")
-            self._finish(False)
-    """
-
     def _run(self, inp, out):
         t0 = time.time()
         try:
