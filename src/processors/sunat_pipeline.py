@@ -332,25 +332,9 @@ def ejecutar_pipeline_sunat(
         _emit(emit, "kpi", "ok", str(ok_c))
         _emit(emit, "kpi", "err", str(err_c))
 
-    _emit(emit, "pipe", "s4", "ok")
-    _emit(
-        emit,
-        "log",
-        f"[OK] Consulta masiva completada. Correctas: {ok_c} | Sin datos o error: {err_c}",
-        "ok",
-    )
-
-    # Paso 5 - Padrón SSCO
-    _emit(emit, "pipe", "s5", "running")
-    _emit(emit, "step", "Descargando padron SSCO...", 0.78)
-    _emit(emit, "log", "[INFO] Descargando Sujetos sin Capacidad Operativa...", "info")
-    ssco = consultar_sujetos_sin_capacidad()
-    _emit(emit, "pipe", "s5", "ok" if ssco["status"] == "ok" else "warn")
-
-    # Paso 6 - Exportación
+    # Guardar resultado individual apenas termina la consulta masiva (paso 4).
     if exportar_excel:
-        _emit(emit, "pipe", "s6", "running")
-        _emit(emit, "step", "Exportando archivos Excel...", 0.90)
+        _emit(emit, "step", "Guardando sunat_ruc_individual.xlsx...", 0.74)
         _emit(emit, "log", f"[INFO] Guardando en: {carpeta_output}", "info")
 
         Path(carpeta_output).mkdir(parents=True, exist_ok=True)
@@ -371,17 +355,41 @@ def ejecutar_pipeline_sunat(
             "ok",
         )
 
+    _emit(emit, "pipe", "s4", "ok")
+    _emit(
+        emit,
+        "log",
+        f"[OK] Consulta masiva completada. Correctas: {ok_c} | Sin datos o error: {err_c}",
+        "ok",
+    )
+
+    # Paso 5 - Padrón SSCO
+    _emit(emit, "pipe", "s5", "running")
+    _emit(emit, "step", "Descargando padron SSCO...", 0.78)
+    _emit(emit, "log", "[INFO] Descargando Sujetos sin Capacidad Operativa...", "info")
+    try:
+        ssco = consultar_sujetos_sin_capacidad()
+    except Exception as exc:
+        ssco = {"status": "error", "mensaje": str(exc), "tablas": []}
+
+    _emit(emit, "pipe", "s5", "ok" if ssco["status"] == "ok" else "warn")
+
+    # Paso 6 - Exportación de SSCO
+    if exportar_excel:
+        _emit(emit, "pipe", "s6", "running")
+
         if ssco["status"] == "ok":
+            _emit(emit, "step", "Exportando sunat_ssco.xlsx...", 0.92)
             tablas_preparadas = preparar_ssco_tablas(ssco["tablas"])
             exportar_lista_a_excel(
                 tablas_preparadas,
-                f"{carpeta_output}/Sujetos sin capacidad operativa.xlsx",
+                f"{carpeta_output}/sunat_ssco.xlsx",
             )
-            _emit(emit, "log", "[OK] Sujetos sin capacidad operativa.xlsx generado.", "ok")
+            _emit(emit, "log", "[OK] sunat_ssco.xlsx generado.", "ok")
+            _emit(emit, "pipe", "s6", "ok")
         else:
             _emit(emit, "log", "[WARN] No se pudo descargar el padron SSCO.", "warn")
-
-        _emit(emit, "pipe", "s6", "ok")
+            _emit(emit, "pipe", "s6", "warn")
 
     if pw is not None and browser is not None:
         try:

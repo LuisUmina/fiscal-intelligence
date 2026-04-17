@@ -252,7 +252,7 @@ class SunatApp(ctk.CTk):
         self._section_title(scrl, "Archivos que se generaran")
         outputs = [
             ("sunat_ruc_individual.xlsx",            "Representantes, Trabajadores, Establecimientos, Información Historica (Razón Social - Condición - Domicilio)"),
-            ("Sujetos sin capacidad operativa.xlsx", "Padron SSCO completo"),
+            ("sunat_ssco.xlsx",                      "Padron SSCO completo"),
         ]
         for fname, desc in outputs:
             row = ctk.CTkFrame(scrl, fg_color=PW_ACCENT, corner_radius=6)
