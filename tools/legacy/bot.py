@@ -17,8 +17,8 @@ import pandas as pd
 # Configuración de procesamiento
 MAX_RUCS_POR_TXT = 100                # Máximo de RUCs por archivo TXT
 ARCHIVO_EXCEL = "rucs.xlsx"           # Nombre del archivo Excel inicial (en ruta principal)
-DEFAULT_PROJECT_NAME = "legacy_temp"
-DEFAULT_SHEET_NAME = "RUCs_Unicos"
+DEFAULT_PROJECT_NAME = "sunat_ruc_masivo_temp"
+DEFAULT_SHEET_NAME = 0
 DEFAULT_RUC_COLUMN = "ruc"
 
 # Nombres de columnas del Excel
@@ -38,7 +38,8 @@ NOMBRE_LEYENDA = "leyenda_lotes.xlsx"    # Nombre del Excel leyenda
 def GenerarBrowser(flagIncognito=False, carpeta_descarga=None):
     try:
         chromeOptions = webdriver.ChromeOptions()
-        chromeOptions.add_argument('--start-maximized')
+        chromeOptions.add_argument('--window-size=1280,800')
+        chromeOptions.add_argument('--window-position=32000,32000')
         chromeOptions.add_argument('--ignore-certificate-errors')  # Ignora errores de certificado
 
 
@@ -77,6 +78,13 @@ def GenerarBrowser(flagIncognito=False, carpeta_descarga=None):
         # Inicializar el navegador Chrome con las opciones configuradas
         #driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chromeOptions)
         driver = webdriver.Chrome(options=chromeOptions)
+
+        # Mover la ventana fuera del rango visible para no interrumpir al usuario.
+        try:
+            driver.set_window_position(32000, 32000)
+            driver.set_window_size(1280, 800)
+        except Exception:
+            pass
 
         # Ejecutar script para desactivar WebDriver
         driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
@@ -298,15 +306,27 @@ def leer_excel_inicial(archivo_excel=ARCHIVO_EXCEL, sheet_name=None, columna_ruc
     """
     try:
         df = pd.read_excel(archivo_excel, sheet_name=sheet_name)
-        
-        # Verificar que existe la columna de RUC
-        if columna_ruc not in df.columns:
-            print(f"[x] Error: No se encontró la columna '{columna_ruc}' en el Excel")
+
+        # Resolver columna RUC con una búsqueda tolerante por nombre.
+        columna_resuelta = None
+        if columna_ruc in df.columns:
+            columna_resuelta = columna_ruc
+        else:
+            mapa_columnas = {str(col).strip().lower(): col for col in df.columns}
+            candidatos = [columna_ruc, COL_RUC, "ruc", "rucs", "nro_ruc", "numero_ruc"]
+            for candidato in candidatos:
+                key = str(candidato).strip().lower()
+                if key in mapa_columnas:
+                    columna_resuelta = mapa_columnas[key]
+                    break
+
+        if columna_resuelta is None:
+            print(f"[x] Error: No se encontró una columna de RUC en el Excel")
             return None
 
         # Normalizar la columna de RUC para que el resto del flujo siga igual
-        if columna_ruc != COL_RUC:
-            df = df.rename(columns={columna_ruc: COL_RUC})
+        if columna_resuelta != COL_RUC:
+            df = df.rename(columns={columna_resuelta: COL_RUC})
 
         # Crear columna TXT_Asignado si no existe
         if COL_TXT_ASIGNADO not in df.columns:
@@ -667,7 +687,7 @@ def consolidar_resultados_desde_zips(carpeta_zip, carpeta_salida):
     df_correctos = pd.concat(resultados_correctos, ignore_index=True) if resultados_correctos else pd.DataFrame()
     df_invalidos = pd.concat(resultados_invalidos, ignore_index=True) if resultados_invalidos else pd.DataFrame()
 
-    ruta_consolidado = os.path.join(carpeta_salida, "RUCs_Consolidado.xlsx")
+    ruta_consolidado = os.path.join(carpeta_salida, "sunat_ruc_masivo.xlsx")
 
     Path(carpeta_salida).mkdir(parents=True, exist_ok=True)
 

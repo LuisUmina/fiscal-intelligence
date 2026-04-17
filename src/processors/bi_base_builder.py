@@ -30,16 +30,19 @@ def construir_base_bi_basica(
     - b3_general_: join con hoja General
     """
     carpeta = Path(carpeta_output)
+    ruta_rucs_unicos = carpeta / "rucs_unicos.xlsx"
     ruta_datos_ruc = carpeta / "sunat_ruc_individual.xlsx"
-    ruta_consolidado = carpeta / "RUCs_Consolidado.xlsx"
+    ruta_consolidado = carpeta / "sunat_ruc_masivo.xlsx"
     ruta_salida = carpeta / nombre_archivo
 
+    if not ruta_rucs_unicos.exists():
+        raise FileNotFoundError(f"No existe el archivo: {ruta_rucs_unicos}")
     if not ruta_datos_ruc.exists():
         raise FileNotFoundError(f"No existe el archivo: {ruta_datos_ruc}")
     if not ruta_consolidado.exists():
         raise FileNotFoundError(f"No existe el archivo: {ruta_consolidado}")
 
-    df_rucs = pd.read_excel(ruta_datos_ruc, sheet_name="RUCs_Unicos")
+    df_rucs = pd.read_excel(ruta_rucs_unicos)
     col_ruc_unicos = _buscar_columna_ruc(df_rucs)
     col_b0_ruc = f"b0_{col_ruc_unicos}"
 
