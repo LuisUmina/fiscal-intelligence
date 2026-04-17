@@ -127,8 +127,8 @@ def _preparar_establecimientos_resumen(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(
             columns=[
                 "_join_ruc",
-                "b3_establecimientos_cantidad",
-                "b3_establecimientos_tiene",
+                "b3_establecimientos_cantidad_establecimientos",
+                "b3_establecimientos_flag_tiene_establecimientos",
             ]
         )
 
@@ -140,18 +140,67 @@ def _preparar_establecimientos_resumen(df: pd.DataFrame) -> pd.DataFrame:
     conteo = (
         df_est.groupby("_join_ruc", as_index=False)
         .size()
-        .rename(columns={"size": "b3_establecimientos_cantidad"})
+        .rename(columns={"size": "b3_establecimientos_cantidad_establecimientos"})
     )
-    conteo["b3_establecimientos_tiene"] = "NO"
-    conteo.loc[conteo["b3_establecimientos_cantidad"] > 0, "b3_establecimientos_tiene"] = "SI"
+    conteo["b3_establecimientos_flag_tiene_establecimientos"] = "NO"
+    conteo.loc[
+        conteo["b3_establecimientos_cantidad_establecimientos"] > 0,
+        "b3_establecimientos_flag_tiene_establecimientos",
+    ] = "SI"
 
     return conteo
 
 
 def _normalizar_columnas_establecimientos(df: pd.DataFrame) -> pd.DataFrame:
     """Completa valores por defecto de Establecimientos para RUC sin cruce."""
-    col_cantidad = "b3_establecimientos_cantidad"
-    col_tiene = "b3_establecimientos_tiene"
+    col_cantidad = "b3_establecimientos_cantidad_establecimientos"
+    col_tiene = "b3_establecimientos_flag_tiene_establecimientos"
+
+    if col_cantidad not in df.columns:
+        df[col_cantidad] = 0
+    df[col_cantidad] = pd.to_numeric(df[col_cantidad], errors="coerce").fillna(0).astype(int)
+
+    if col_tiene not in df.columns:
+        df[col_tiene] = "NO"
+    df[col_tiene] = df[col_tiene].fillna("NO")
+
+    return df
+
+
+def _preparar_representantes_resumen(df: pd.DataFrame) -> pd.DataFrame:
+    """Agrupa Representantes por RUC y calcula cantidad de filas por RUC."""
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "_join_ruc",
+                "b4_representantes_cantidad_representantes",
+                "b4_representantes_flag_tiene_representantes",
+            ]
+        )
+
+    col_ruc = _buscar_columna_ruc(df)
+    df_rep = df.copy()
+    df_rep["_join_ruc"] = _normalizar_ruc_serie(df_rep[col_ruc])
+    df_rep = df_rep[df_rep["_join_ruc"] != ""]
+
+    conteo = (
+        df_rep.groupby("_join_ruc", as_index=False)
+        .size()
+        .rename(columns={"size": "b4_representantes_cantidad_representantes"})
+    )
+    conteo["b4_representantes_flag_tiene_representantes"] = "NO"
+    conteo.loc[
+        conteo["b4_representantes_cantidad_representantes"] > 0,
+        "b4_representantes_flag_tiene_representantes",
+    ] = "SI"
+
+    return conteo
+
+
+def _normalizar_columnas_representantes(df: pd.DataFrame) -> pd.DataFrame:
+    """Completa valores por defecto de Representantes para RUC sin cruce."""
+    col_cantidad = "b4_representantes_cantidad_representantes"
+    col_tiene = "b4_representantes_flag_tiene_representantes"
 
     if col_cantidad not in df.columns:
         df[col_cantidad] = 0
@@ -176,6 +225,7 @@ def construir_base_bi_basica(
     3. Left join con sunat_ruc_individual.xlsx (hoja General)
     4. Left join con sunat_ruc_individual.xlsx (hoja Trabajadores, promedios por RUC)
     5. Left join con sunat_ruc_individual.xlsx (hoja Establecimientos, conteo por RUC)
+    6. Left join con sunat_ruc_individual.xlsx (hoja Representantes, conteo por RUC)
     """
     carpeta = Path(carpeta_output)
     ruta_rucs_unicos = carpeta / "rucs_unicos.xlsx"
@@ -226,6 +276,13 @@ def construir_base_bi_basica(
     df_establecimientos_join = _preparar_establecimientos_resumen(df_establecimientos)
     base_bi = base_bi.merge(df_establecimientos_join, on="_join_ruc", how="left")
     base_bi = _normalizar_columnas_establecimientos(base_bi)
+
+    # Left join 5: base_rucs <- sunat_ruc_individual.xlsx (Representantes, conteo por RUC)
+    df_representantes = _leer_hoja_si_existe(ruta_datos_ruc, "Representantes")
+    df_representantes = _mantener_solo_filas_validas(df_representantes)
+    df_representantes_join = _preparar_representantes_resumen(df_representantes)
+    base_bi = base_bi.merge(df_representantes_join, on="_join_ruc", how="left")
+    base_bi = _normalizar_columnas_representantes(base_bi)
 
     base_bi = base_bi.drop(columns=["_join_ruc"])
     columnas_ordenadas = [col_b0_ruc] + [c for c in base_bi.columns if c != col_b0_ruc]
