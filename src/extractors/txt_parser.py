@@ -1,6 +1,7 @@
 import os
-from unittest import skip
+
 import pandas as pd
+
 from config.settings import TXT_FILE_FORMATS
 
 def get_txt_format_type(filename):
@@ -66,18 +67,14 @@ def extract_rucs_from_file(filepath, tipo):
     return rucs
 
 def extract_rucs_from_folder(folder_path):
-    """Devuelve (lista_rucs_unicos, lista_ruc_archivo, errores_txt).
+    """Devuelve (lista_rucs_unicos, errores_txt).
 
     - lista_rucs_unicos: RUCs únicos encontrados en la carpeta.
-    - lista_ruc_archivo: relación RUC -> archivo (una fila por archivo, sin duplicar dentro del mismo TXT).
     - errores_txt: lista con errores por archivo (para mostrarlos en pantalla).
     """
 
     # Set no permite tener duplicados
     todos_los_rucs = set()
-
-    # Para definir de que archivo provienen
-    rucs_archivos = []
 
     # Para guardar fallos por TXT sin detener el proceso
     errores_txt = []
@@ -99,23 +96,18 @@ def extract_rucs_from_folder(folder_path):
         try:
             rucs_del_archivo = extract_rucs_from_file(ruta_completa, tipo)
             todos_los_rucs.update(rucs_del_archivo)
-
-            # Un RUC por archivo solo una vez (sin duplicados dentro del mismo TXT)
-            for ruc in set(rucs_del_archivo):
-                rucs_archivos.append({"ruc": ruc, "archivo": filename})
         except Exception as exc:
             errores_txt.append({"archivo": filename, "error": str(exc)})
             continue
 
-    return list(todos_los_rucs), rucs_archivos, errores_txt
+    return list(todos_los_rucs), errores_txt
 
 
 """
 
 if __name__ == "__main__":
-    rucs, rucs_archivos, errores_txt = extract_rucs_from_folder("tst")
+    rucs, errores_txt = extract_rucs_from_folder("tst")
     print(f"Total RUCs únicos: {len(rucs)}")
-    print(f"Total filas RUC-archivo: {len(rucs_archivos)}")
     print(f"Errores TXT: {len(errores_txt)}")
     print(rucs)
 """

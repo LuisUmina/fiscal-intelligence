@@ -27,10 +27,10 @@ def construir_base_bi_basica(
     - b0_: base de RUCs unicos
     - b1_: join con hoja Correctos
     - b2_trabajadores_: join agregado por RUC desde hoja Trabajadores
-    - b3_general_: join con hoja Scraper_General
+    - b3_general_: join con hoja General
     """
     carpeta = Path(carpeta_output)
-    ruta_datos_ruc = carpeta / "DATOS_RUC.xlsx"
+    ruta_datos_ruc = carpeta / "sunat_ruc_individual.xlsx"
     ruta_consolidado = carpeta / "RUCs_Consolidado.xlsx"
     ruta_salida = carpeta / nombre_archivo
 
@@ -107,8 +107,8 @@ def construir_base_bi_basica(
 
             base_bi = base_bi.merge(agg, on="_join_ruc", how="left")
 
-    # Join b3: Scraper_General (sin agregacion, un registro por RUC)
-    df_scraper = pd.read_excel(ruta_datos_ruc, sheet_name="Scraper_General")
+    # Join b3: General (sin agregacion, un registro por RUC)
+    df_scraper = pd.read_excel(ruta_datos_ruc, sheet_name="General")
     if not df_scraper.empty:
         col_ruc_scraper = _buscar_columna_ruc(df_scraper)
         df_scraper = df_scraper.copy()

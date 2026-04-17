@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 from typing import Callable, Optional
 
+import pandas as pd
+
 from src.extractors.sunat_consulta_ruc_request import (
     _warmup_sesion,
     consultar_establecimientos,
@@ -18,6 +20,7 @@ from src.extractors.sunat_ssco import consultar_sujetos_sin_capacidad
 from src.extractors.txt_parser import extract_rucs_from_folder
 from src.transformers.excel_exporter import (
     exportar_lista_a_excel,
+    exportar_rucs_unicos_excel,
     exportar_ruc_a_excel_por_hojas,
 )
 from src.transformers.preparar_ssco import preparar_ssco_tablas
@@ -41,6 +44,24 @@ def _to_error_row(row_vacio: dict) -> dict:
     elif "codigo" in row:
         row["codigo"] = "ERROR"
     return row
+
+
+def _leer_rucs_desde_excel(ruta_excel: Path, nombre_columna: str = "ruc") -> list[str]:
+    """Lee RUCs únicos desde un Excel de una sola columna."""
+    df = pd.read_excel(ruta_excel)
+
+    if nombre_columna not in df.columns:
+        raise ValueError(f"No se encontro la columna '{nombre_columna}' en {ruta_excel}")
+
+    rucs = (
+        df[nombre_columna]
+        .dropna()
+        .astype(str)
+        .str.strip()
+    )
+    rucs = rucs[rucs != ""]
+
+    return rucs.tolist()
 
 
 def ejecutar_pipeline_sunat(
@@ -90,9 +111,19 @@ def ejecutar_pipeline_sunat(
     _emit(emit, "pipe", "s2", "running")
     _emit(emit, "step", "Extrayendo RUCs de los TXT...", 0.08)
 
-    rucs, rucs_archivos, errores_txt = extract_rucs_from_folder(carpeta_txt)
+    rucs, errores_txt = extract_rucs_from_folder(carpeta_txt)
     _emit(emit, "kpi", "rucs", str(len(rucs)))
     _emit(emit, "log", f"[INFO] RUCs unicos extraidos: {len(rucs)}", "info")
+
+    if carpeta_output:
+        ruta_rucs_unicos = Path(carpeta_output) / "rucs_unicos.xlsx"
+        exportar_rucs_unicos_excel(rucs, ruta_rucs_unicos)
+        _emit(emit, "log", f"[OK] rucs_unicos.xlsx generado: {ruta_rucs_unicos}", "ok")
+
+        # A partir de este punto, la fuente de verdad para consultas es rucs_unicos.xlsx.
+        rucs = _leer_rucs_desde_excel(ruta_rucs_unicos)
+        _emit(emit, "kpi", "rucs", str(len(rucs)))
+        _emit(emit, "log", f"[INFO] RUCs cargados desde rucs_unicos.xlsx: {len(rucs)}", "info")
 
     for item in errores_txt:
         archivo = item.get("archivo", "")
@@ -113,7 +144,6 @@ def ejecutar_pipeline_sunat(
             "hist_company_name": hist_company_name,
             "hist_taxpayer_status": hist_taxpayer_status,
             "hist_fiscal_address": hist_fiscal_address,
-            "rucs_archivos": rucs_archivos,
             "errores_txt": errores_txt,
             "ssco": {"status": "no_data", "tablas": []},
             "ok_count": ok_c,
@@ -160,7 +190,6 @@ def ejecutar_pipeline_sunat(
                 "hist_company_name": hist_company_name,
                 "hist_taxpayer_status": hist_taxpayer_status,
                 "hist_fiscal_address": hist_fiscal_address,
-                "rucs_archivos": rucs_archivos,
                 "errores_txt": errores_txt,
                 "ssco": {"status": "no_data", "tablas": []},
                 "ok_count": ok_c,
@@ -329,8 +358,7 @@ def ejecutar_pipeline_sunat(
             reps,
             trabs,
             ests,
-            f"{carpeta_output}/DATOS_RUC.xlsx",
-            rucs_archivos=rucs_archivos,
+            f"{carpeta_output}/sunat_ruc_individual.xlsx",
             scraper_general=scraper_general,
             hist_company_name=hist_company_name,
             hist_taxpayer_status=hist_taxpayer_status,
@@ -339,7 +367,7 @@ def ejecutar_pipeline_sunat(
         _emit(
             emit,
             "log",
-            "[OK] DATOS_RUC.xlsx generado (hojas: Representantes, Trabajadores, Establecimientos, Scraper_General, Hist_RazonSocial, Hist_Condicion, Hist_Domicilio).",
+            "[OK] sunat_ruc_individual.xlsx generado (hojas: Representantes, Trabajadores, Establecimientos, General, Hist_RazonSocial, Hist_Condicion, Hist_Domicilio).",
             "ok",
         )
 
@@ -372,7 +400,6 @@ def ejecutar_pipeline_sunat(
         "hist_company_name": hist_company_name,
         "hist_taxpayer_status": hist_taxpayer_status,
         "hist_fiscal_address": hist_fiscal_address,
-        "rucs_archivos": rucs_archivos,
         "errores_txt": errores_txt,
         "ssco": ssco,
         "ok_count": ok_c,

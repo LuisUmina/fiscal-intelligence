@@ -19,12 +19,26 @@ def exportar_lista_a_excel(filas, ruta_salida):
     df.to_excel(ruta_salida, index=False)
 
 
+def exportar_rucs_unicos_excel(rucs, ruta_salida, nombre_columna="ruc"):
+    """Exporta un Excel de RUCs únicos con una sola columna."""
+    rucs_limpios = []
+    for ruc in rucs:
+        texto = str(ruc).strip()
+        if texto:
+            rucs_limpios.append(texto)
+
+    rucs_ordenados = sorted(set(rucs_limpios))
+    df = pd.DataFrame({nombre_columna: rucs_ordenados})
+    df = _limpiar_df(df)
+    Path(ruta_salida).parent.mkdir(parents=True, exist_ok=True)
+    df.to_excel(ruta_salida, index=False)
+
+
 def exportar_ruc_a_excel_por_hojas(
     reps,
     trabs,
     ests,
     ruta_salida,
-    rucs_archivos=None,
     scraper_general=None,
     hist_company_name=None,
     hist_taxpayer_status=None,
@@ -34,7 +48,6 @@ def exportar_ruc_a_excel_por_hojas(
 
     Siempre incluye Representantes, Trabajadores y Establecimientos.
     Opcionalmente agrega:
-    - RUCs_Unicos (si se pasa rucs_archivos)
     - 3 hojas de información histórica (si se pasan listas históricas)
     """
     Path(ruta_salida).parent.mkdir(parents=True, exist_ok=True)
@@ -46,7 +59,7 @@ def exportar_ruc_a_excel_por_hojas(
         ]
 
         if scraper_general is not None:
-            hojas.append(("Scraper_General", scraper_general))
+            hojas.append(("General", scraper_general))
 
         if hist_company_name is not None:
             hojas.append(("Hist_RazonSocial", hist_company_name))
@@ -59,9 +72,4 @@ def exportar_ruc_a_excel_por_hojas(
             df = pd.DataFrame(filas)
             df = _limpiar_df(df)
             df.to_excel(writer, sheet_name=nombre_hoja, index=False)
-
-        if rucs_archivos:
-            df_rucs = pd.DataFrame(rucs_archivos)
-            df_rucs = _limpiar_df(df_rucs)
-            df_rucs.to_excel(writer, sheet_name="RUCs_Unicos", index=False)
 

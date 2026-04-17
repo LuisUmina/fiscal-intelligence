@@ -251,7 +251,7 @@ class SunatApp(ctk.CTk):
         # Archivos que se generaran (compacto)
         self._section_title(scrl, "Archivos que se generaran")
         outputs = [
-            ("DATOS_RUC.xlsx",                       "Representantes, Trabajadores, Establecimientos, Información Historica (Razón Social - Condición - Domicilio) y RUCs Únicos (7 hojas)"),
+            ("sunat_ruc_individual.xlsx",            "Representantes, Trabajadores, Establecimientos, Información Historica (Razón Social - Condición - Domicilio)"),
             ("Sujetos sin capacidad operativa.xlsx", "Padron SSCO completo"),
         ]
         for fname, desc in outputs:
@@ -459,7 +459,7 @@ class SunatApp(ctk.CTk):
     def _launch_legacy_bot(self):
         repo_root = Path(__file__).resolve().parent
         legacy_bot = repo_root / "tools" / "legacy" / "bot.py"
-        excel_path = Path(self.v_output.get().strip()) / "DATOS_RUC.xlsx"
+        excel_path = Path(self.v_output.get().strip()) / "sunat_ruc_individual.xlsx"
 
         if not legacy_bot.exists():
             messagebox.showerror("Error", f"No se encontro el bot legacy en:\n{legacy_bot}")
@@ -529,7 +529,7 @@ class SunatApp(ctk.CTk):
             return
 
         try:
-            self._log("[INFO] Generando BASE_BI.xlsx desde DATOS_RUC.xlsx y RUCs_Consolidado.xlsx...", "info")
+            self._log("[INFO] Generando BASE_BI.xlsx desde sunat_ruc_individual.xlsx y RUCs_Consolidado.xlsx...", "info")
             resumen = construir_base_bi_basica(out)
             self._log(
                 f"[OK] Base BI generada: {resumen['archivo_salida']} | RUCs: {resumen['total_rucs']} | Coincidencias: {resumen['coincidencias_correctos']}",
