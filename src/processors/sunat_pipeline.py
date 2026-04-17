@@ -18,6 +18,7 @@ from src.extractors.sunat_ruc_scraper import (
 )
 from src.extractors.sunat_ssco import consultar_sujetos_sin_capacidad
 from src.extractors.txt_parser import extract_rucs_from_folder
+from src.processors.txt_consolidator import exportar_consolidado_txt_excel
 from src.transformers.excel_exporter import (
     exportar_lista_a_excel,
     exportar_rucs_unicos_excel,
@@ -119,6 +120,10 @@ def ejecutar_pipeline_sunat(
         ruta_rucs_unicos = Path(carpeta_output) / "rucs_unicos.xlsx"
         exportar_rucs_unicos_excel(rucs, ruta_rucs_unicos)
         _emit(emit, "log", f"[OK] rucs_unicos.xlsx generado: {ruta_rucs_unicos}", "ok")
+
+        ruta_consolidado_txt = Path(carpeta_output) / "consolidado_txt.xlsx"
+        df_consolidado_txt = exportar_consolidado_txt_excel(carpeta_txt, str(ruta_consolidado_txt))
+        _emit(emit, "log", f"[OK] consolidado_txt.xlsx generado: {ruta_consolidado_txt} | Filas: {len(df_consolidado_txt)}", "ok")
 
         # A partir de este punto, la fuente de verdad para consultas es rucs_unicos.xlsx.
         rucs = _leer_rucs_desde_excel(ruta_rucs_unicos)

@@ -530,7 +530,7 @@ class SunatApp(ctk.CTk):
             return
 
         try:
-            self._log("[INFO] Generando base_bi.xlsx desde rucs_unicos.xlsx, sunat_ruc_individual.xlsx y sunat_ruc_masivo.xlsx...", "info")
+            self._log("[INFO] Generando base_bi.xlsx desde rucs_unicos.xlsx, consolidado_txt.xlsx, sunat_ruc_individual.xlsx y sunat_ruc_masivo.xlsx...", "info")
             resumen = construir_base_bi_basica(out)
             self._log(
                 f"[OK] Base BI generada: {resumen['archivo_salida']} | RUCs: {resumen['total_rucs']} | Coincidencias: {resumen['coincidencias_correctos']}",

@@ -231,6 +231,7 @@ def construir_base_bi_basica(
     ruta_rucs_unicos = carpeta / "rucs_unicos.xlsx"
     ruta_datos_ruc = carpeta / "sunat_ruc_individual.xlsx"
     ruta_consolidado = carpeta / "sunat_ruc_masivo.xlsx"
+    ruta_consolidado_txt = carpeta / "consolidado_txt.xlsx"
     ruta_salida = carpeta / nombre_archivo
 
     if not ruta_rucs_unicos.exists():
@@ -288,8 +289,16 @@ def construir_base_bi_basica(
     columnas_ordenadas = [col_b0_ruc] + [c for c in base_bi.columns if c != col_b0_ruc]
     base_bi = base_bi[columnas_ordenadas]
 
+    df_consolidado_txt = pd.DataFrame()
+    if ruta_consolidado_txt.exists():
+        try:
+            df_consolidado_txt = pd.read_excel(ruta_consolidado_txt, sheet_name="consolidado_txt")
+        except ValueError:
+            df_consolidado_txt = pd.read_excel(ruta_consolidado_txt)
+
     with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
         base_bi.to_excel(writer, sheet_name="base_bi", index=False)
+        df_consolidado_txt.to_excel(writer, sheet_name="consolidado_txt", index=False)
 
     col_data = [c for c in base_bi.columns if c != col_b0_ruc]
     coincidencias = int(base_bi[col_data].notna().any(axis=1).sum()) if col_data else 0
