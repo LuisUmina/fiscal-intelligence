@@ -1,0 +1,1 @@
+pyinstaller --noconfirm --clean --onefile --windowed --name "SUNAT-Analytics" --add-data "tools\legacy;tools\legacy" --collect-all customtkinter --collect-all cryptography --collect-all pandas --collect-all openpyxl --collect-all playwright --collect-all selenium app.py

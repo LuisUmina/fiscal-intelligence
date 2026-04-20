@@ -2,7 +2,6 @@
 config/branding.py
 
 # Ejecutables y binarios
-ejecutable.bat
 SUNAT-Analytics_v4.exe
 *.exe
 
