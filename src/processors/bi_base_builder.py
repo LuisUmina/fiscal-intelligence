@@ -102,7 +102,7 @@ def _preparar_trabajadores_promedio(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _agregar_flags_trabajadores(df: pd.DataFrame) -> pd.DataFrame:
-    """Agrega flags SI/NO/N/A para promedios de trabajadores por RUC."""
+    """Agrega flags SI/NO para promedios de trabajadores por RUC."""
     mapeo = {
         "b2_trabajadores_prom_nro_trabajadores": "b2_trabajadores_flag_tiene_trabajadores",
         "b2_trabajadores_prom_nro_pensionistas": "b2_trabajadores_flag_tiene_pensionistas",
@@ -114,9 +114,24 @@ def _agregar_flags_trabajadores(df: pd.DataFrame) -> pd.DataFrame:
             continue
 
         serie = pd.to_numeric(df[col_prom], errors="coerce")
-        df[col_flag] = "N/A"
-        df.loc[serie.notna() & (serie <= 0), col_flag] = "NO"
+        df[col_flag] = "NO"
         df.loc[serie.notna() & (serie > 0), col_flag] = "SI"
+
+    return df
+
+
+def _normalizar_columnas_trabajadores(df: pd.DataFrame) -> pd.DataFrame:
+    """Completa valores por defecto de Trabajadores para RUC sin cruce."""
+    promedios = [
+        "b2_trabajadores_prom_nro_trabajadores",
+        "b2_trabajadores_prom_nro_pensionistas",
+        "b2_trabajadores_prom_nro_prestadores_servicios",
+    ]
+
+    for col in promedios:
+        if col not in df.columns:
+            df[col] = 0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     return df
 
@@ -374,6 +389,7 @@ def construir_base_bi_basica(
     df_trabajadores_join = _preparar_trabajadores_promedio(df_trabajadores)
     base_bi = base_bi.merge(df_trabajadores_join, on="_join_ruc", how="left")
     base_bi = _agregar_flags_trabajadores(base_bi)
+    base_bi = _normalizar_columnas_trabajadores(base_bi)
 
     # Left join 4: base_rucs <- sunat_ruc_individual.xlsx (Establecimientos, conteo por RUC)
     df_establecimientos = _leer_hoja_si_existe(ruta_datos_ruc, "Establecimientos")
