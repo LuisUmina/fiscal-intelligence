@@ -228,6 +228,48 @@ def _normalizar_columnas_representantes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _consolidar_estado_condicion_contribuyente(df: pd.DataFrame) -> pd.DataFrame:
+    """Consolida estado y condicion del contribuyente entre masivo e individual."""
+    col_estado_v1 = "b1_Estado del Contribuyente"
+    col_condicion_v1 = "b1_Condicion del Contribuyente"
+    col_estado_v2 = "b2_general_estado_contribuyente"
+    col_condicion_v2 = "b2_general_condicion_contribuyente"
+
+    col_estado_final = "b1_b2_estado_contribuyente_final"
+    col_condicion_final = "b1_b2_condicion_contribuyente_final"
+    col_estado_coincide = "b1_b2_estado_contribuyente_coincide"
+    col_condicion_coincide = "b1_b2_condicion_contribuyente_coincide"
+
+    def _serie_texto(nombre_columna: str) -> pd.Series:
+        if nombre_columna not in df.columns:
+            return pd.Series([""] * len(df), index=df.index)
+        return df[nombre_columna].fillna("").astype(str).str.strip()
+
+    estado_v1 = _serie_texto(col_estado_v1)
+    condicion_v1 = _serie_texto(col_condicion_v1)
+    estado_v2 = _serie_texto(col_estado_v2)
+    condicion_v2 = _serie_texto(col_condicion_v2)
+
+    estado_tiene_dato = estado_v1.ne("") | estado_v2.ne("")
+    condicion_tiene_dato = condicion_v1.ne("") | condicion_v2.ne("")
+
+    df[col_estado_coincide] = ""
+    df.loc[estado_tiene_dato, col_estado_coincide] = "NO"
+    df.loc[estado_v1.ne("") & estado_v2.ne("") & (estado_v1 == estado_v2), col_estado_coincide] = "SI"
+
+    df[col_condicion_coincide] = ""
+    df.loc[condicion_tiene_dato, col_condicion_coincide] = "NO"
+    df.loc[condicion_v1.ne("") & condicion_v2.ne("") & (condicion_v1 == condicion_v2), col_condicion_coincide] = "SI"
+
+    df[col_estado_final] = estado_v2.where(estado_v2.ne(""), estado_v1)
+    df.loc[~estado_tiene_dato, col_estado_final] = ""
+
+    df[col_condicion_final] = condicion_v2.where(condicion_v2.ne(""), condicion_v1)
+    df.loc[~condicion_tiene_dato, col_condicion_final] = ""
+
+    return df
+
+
 def _obtener_valores_ssco(ruta_ssco: Path) -> list[str]:
     """Devuelve todos los valores SSCO de RUC y representante legal limpio."""
     if not ruta_ssco.exists():
@@ -382,6 +424,7 @@ def construir_base_bi_basica(
     df_general = _mantener_solo_filas_validas(df_general)
     df_general_join = _preparar_join_directo(df_general, "b2_general_")
     base_bi = base_bi.merge(df_general_join, on="_join_ruc", how="left")
+    base_bi = _consolidar_estado_condicion_contribuyente(base_bi)
 
     # Left join 3: base_rucs <- sunat_ruc_individual.xlsx (Trabajadores, promedio por RUC)
     df_trabajadores = _leer_hoja_si_existe(ruta_datos_ruc, "Trabajadores")
