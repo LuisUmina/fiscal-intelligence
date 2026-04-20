@@ -3,6 +3,7 @@ beautifulsoup4==4.14.3
 certifi==2026.2.25
 charset-normalizer==3.4.4
 customtkinter==5.2.2
+cryptography==46.0.3
 darkdetect==0.8.0
 et_xmlfile==2.0.0
 greenlet==3.3.2

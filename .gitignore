@@ -29,3 +29,9 @@ venv/
 .vscode/
 .idea/
 *.swp
+
+
+license_manager/license_keys/
+license.json
+license_public_key.pem
+comandos.txt

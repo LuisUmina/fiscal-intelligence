@@ -20,6 +20,7 @@ from config.branding import (
     WINDOW_TITLE, BRAND_NAME, BRAND_COLOR_HEX,
     MAIN_TITLE, SUBTITLE, VERSION, TAGLINE, STATUS_DESCRIPTION
 )
+from src.security import validate_license
 
 #from src.transformers.excel_exporter import exportar_lista_a_excel, exportar_ruc_a_excel_por_hojas
 #from src.transformers.preparar_ssco import preparar_ssco_tablas
@@ -663,5 +664,31 @@ class SunatApp(ctk.CTk):
 
 
 if __name__ == "__main__":
+    app_root = Path(__file__).resolve().parent
+    license_bundle_root = app_root / "license_manager"
+    license_result = validate_license(
+        license_path=license_bundle_root / "license.json",
+        public_key_path=license_bundle_root / "license_public_key.pem",
+    )
+
+    if not license_result.valid:
+        bootstrap = tk.Tk()
+        bootstrap.withdraw()
+        messagebox.showerror("Licencia invalida", license_result.message)
+        bootstrap.destroy()
+        raise SystemExit(1)
+
+    if license_result.days_to_expiry is not None and license_result.days_to_expiry <= 7:
+        bootstrap = tk.Tk()
+        bootstrap.withdraw()
+        messagebox.showwarning(
+            "Licencia por vencer",
+            (
+                f"La licencia vence en {license_result.days_to_expiry} dia(s). "
+                "Contacta al administrador para renovarla."
+            ),
+        )
+        bootstrap.destroy()
+
     app = SunatApp()
     app.mainloop()
