@@ -213,6 +213,109 @@ def _normalizar_columnas_representantes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _obtener_valores_ssco(ruta_ssco: Path) -> list[str]:
+    """Devuelve todos los valores SSCO de RUC y representante legal limpio."""
+    if not ruta_ssco.exists():
+        return []
+
+    df_ssco = pd.read_excel(ruta_ssco)
+    if df_ssco.empty:
+        return []
+
+    col_ruc_ssco = None
+    col_rep_ssco = None
+    for col in df_ssco.columns:
+        normalizada = str(col).strip().lower()
+        if col_ruc_ssco is None and normalizada == "ruc":
+            col_ruc_ssco = col
+        if col_rep_ssco is None and normalizada == "ruc o documento de identidad del representante legal (1)_limpia":
+            col_rep_ssco = col
+
+    valores_ssco = []
+    if col_ruc_ssco is not None:
+        valores_ssco.extend(df_ssco[col_ruc_ssco].fillna("").astype(str).tolist())
+    if col_rep_ssco is not None:
+        valores_ssco.extend(df_ssco[col_rep_ssco].fillna("").astype(str).tolist())
+
+    return [v for v in valores_ssco if v != ""]
+
+
+def _agregar_flag_ssco_empresa(base_bi: pd.DataFrame, col_ruc_base: str, valores_ssco: list[str]) -> pd.DataFrame:
+    """Agrega flag SI/NO si un valor SSCO esta contenido en el RUC base."""
+    col_flag = "b5_ssco_flag_empresa"
+    base_bi[col_flag] = "NO"
+
+    if not valores_ssco:
+        return base_bi
+
+    base_bi[col_flag] = base_bi[col_ruc_base].astype(str).apply(
+        lambda ruc: "SI" if any(valor_ssco in ruc for valor_ssco in valores_ssco) else "NO"
+    )
+
+    return base_bi
+
+
+def _agregar_flag_ssco_representante_legal(
+    base_bi: pd.DataFrame,
+    df_representantes: pd.DataFrame,
+    col_ruc_base: str,
+    valores_ssco: list[str],
+) -> pd.DataFrame:
+    """Agrega flag y detalle de representantes legales encontrados en SSCO."""
+    col_flag = "b5_ssco_flag_representante_legal"
+    col_docs = "b5_ssco_docs_representante_legal"
+    col_nombres = "b5_ssco_nombres_representante_legal"
+
+    base_bi[col_flag] = "NO"
+    base_bi[col_docs] = ""
+    base_bi[col_nombres] = ""
+
+    if df_representantes.empty or not valores_ssco:
+        return base_bi
+
+    if "nro_documento" not in df_representantes.columns or "nombre" not in df_representantes.columns:
+        return base_bi
+
+    def _limpiar_documento(valor: str) -> str:
+        texto = str(valor)
+        return texto.replace(".0", "")
+
+    col_ruc_rep = _buscar_columna_ruc(df_representantes)
+    df_rep = df_representantes[[col_ruc_rep, "nro_documento", "nombre"]].copy()
+    df_rep[col_ruc_rep] = _normalizar_ruc_serie(df_rep[col_ruc_rep])
+    df_rep["nro_documento"] = df_rep["nro_documento"].fillna("").astype(str).apply(_limpiar_documento)
+    df_rep["nombre"] = df_rep["nombre"].fillna("").astype(str)
+
+    encontrados_por_ruc: dict[str, dict[str, list[str]]] = {}
+
+    for _, fila in df_rep.iterrows():
+        ruc = fila[col_ruc_rep]
+        nro_documento = fila["nro_documento"]
+        nombre = fila["nombre"]
+
+        if nro_documento == "":
+            continue
+
+        if any(valor_ssco in nro_documento for valor_ssco in valores_ssco):
+            if ruc not in encontrados_por_ruc:
+                encontrados_por_ruc[ruc] = {"docs": [], "nombres": []}
+
+            if nro_documento not in encontrados_por_ruc[ruc]["docs"]:
+                encontrados_por_ruc[ruc]["docs"].append(nro_documento)
+            if nombre not in encontrados_por_ruc[ruc]["nombres"]:
+                encontrados_por_ruc[ruc]["nombres"].append(nombre)
+
+    for idx, fila in base_bi.iterrows():
+        ruc_base = str(fila[col_ruc_base])
+        match = encontrados_por_ruc.get(ruc_base)
+        if match:
+            base_bi.at[idx, col_flag] = "SI"
+            base_bi.at[idx, col_docs] = "|".join(match["docs"])
+            base_bi.at[idx, col_nombres] = "|".join(match["nombres"])
+
+    return base_bi
+
+
 def construir_base_bi_basica(
     carpeta_output: str,
     nombre_archivo: str = "base_bi.xlsx",
@@ -231,6 +334,7 @@ def construir_base_bi_basica(
     ruta_rucs_unicos = carpeta / "rucs_unicos.xlsx"
     ruta_datos_ruc = carpeta / "sunat_ruc_individual.xlsx"
     ruta_consolidado = carpeta / "sunat_ruc_masivo.xlsx"
+    ruta_ssco = carpeta / "sunat_ssco.xlsx"
     ruta_consolidado_txt = carpeta / "consolidado_txt.xlsx"
     ruta_salida = carpeta / nombre_archivo
 
@@ -284,6 +388,19 @@ def construir_base_bi_basica(
     df_representantes_join = _preparar_representantes_resumen(df_representantes)
     base_bi = base_bi.merge(df_representantes_join, on="_join_ruc", how="left")
     base_bi = _normalizar_columnas_representantes(base_bi)
+
+    valores_ssco = _obtener_valores_ssco(ruta_ssco)
+
+    # Columna calculada SSCO empresa: compara valor_ssco in b0_ruc
+    base_bi = _agregar_flag_ssco_empresa(base_bi, col_b0_ruc, valores_ssco)
+
+    # Columna calculada SSCO representante legal: compara valor_ssco in nro_documento
+    base_bi = _agregar_flag_ssco_representante_legal(
+        base_bi,
+        df_representantes,
+        col_b0_ruc,
+        valores_ssco,
+    )
 
     base_bi = base_bi.drop(columns=["_join_ruc"])
     columnas_ordenadas = [col_b0_ruc] + [c for c in base_bi.columns if c != col_b0_ruc]
