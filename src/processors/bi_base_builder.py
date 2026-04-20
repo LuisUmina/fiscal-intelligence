@@ -270,6 +270,70 @@ def _consolidar_estado_condicion_contribuyente(df: pd.DataFrame) -> pd.DataFrame
     return df
 
 
+def _agregar_abreviatura_tipo_contribuyente(df: pd.DataFrame) -> pd.DataFrame:
+    """Agrega la abreviatura del tipo de contribuyente junto a la columna original."""
+    col_origen = "b1_Tipo de Contribuyente"
+    col_destino = "b1_tipo_contribuyente_abreviatura"
+
+    if col_origen not in df.columns:
+        return df
+
+    serie_origen = df[col_origen].fillna("").astype(str).str.strip().str.upper()
+
+    reglas_exactas = {
+        "E.I.R.L.": ["E.I.R.L.", "EMPRESA INDIVIDUAL DE RESP. LTDA", "EMPRESA INDIVIDUAL DE RESPONSABILIDAD LIMITADA"],
+        "S.A.": ["SOCIEDAD ANONIMA"],
+        "S.R.L.": ["SOC.COM.RESPONS. LTDA", "SOCIEDAD COMERCIAL DE RESPONSABILIDAD LIMITADA"],
+        "S.A.C.": ["SOCIEDAD ANONIMA CERRADA"],
+        "P.N.": ["PERSONA NATURAL CON NEGOCIO"],
+        "Asociación": ["ASOCIACION"],
+        "S.A.A.": ["SOCIEDAD ANONIMA ABIERTA"],
+        "EMP. ESTATAL": ["EMPRESA ESTATAL DE DERECHO PRIVADO"],
+        "ENT. AUXILIO": ["ENTIDADES DE AUXILIO MUTUO"],
+        "INT. PUBLICAS": ["INSTITUCIONES PUBLICAS"],
+        "AG. EXTRANJ.": ["SUCURSALES O AG. DE EMP. EXTRANJ."],
+        "S.C.": ["SOCIEDAD CIVIL"],
+    }
+
+    reglas_contiene = [
+        ("P.N.", "PERSONA NATURAL CON NEGOCIO"),
+        ("J.P.", "JUNTA DE PROPIETARIOS"),
+        ("GOB.REG.", "GOBIERNO REGIONAL LOCAL"),
+        ("COMU. NAT.", "COMUNIDAD CAMPESINA NATIVA"),
+        ("EMP. ECN. MXTA", "EMPRESA DE ECONOMIA MIXTA"),
+        ("COOP. SAIS", "COOPERATIVAS SAIS CAPS"),
+        ("GOB. CENT.", "GOBIERNO CENTRAL"),
+    ]
+
+    def _abreviar_tipo(valor: str) -> str:
+        texto = str(valor).strip().upper()
+        if not texto:
+            return ""
+
+        for abreviatura, variantes in reglas_exactas.items():
+            if texto in variantes:
+                return abreviatura
+
+        for abreviatura, patron in reglas_contiene:
+            if patron in texto:
+                return abreviatura
+
+        return "Otros"
+
+    serie_abreviada = serie_origen.apply(_abreviar_tipo)
+
+    df[col_destino] = serie_abreviada
+
+    columnas = list(df.columns)
+    if col_destino in columnas:
+        columnas.remove(col_destino)
+        indice_origen = columnas.index(col_origen)
+        columnas.insert(indice_origen + 1, col_destino)
+        df = df[columnas]
+
+    return df
+
+
 def _obtener_valores_ssco(ruta_ssco: Path) -> list[str]:
     """Devuelve todos los valores SSCO de RUC y representante legal limpio."""
     if not ruta_ssco.exists():
@@ -373,6 +437,49 @@ def _agregar_flag_ssco_representante_legal(
     return base_bi
 
 
+def _agregar_estado_observacion(base_bi: pd.DataFrame) -> pd.DataFrame:
+    """Agrega columna final de observacion por capas de riesgo y SSCO."""
+    col_obs = "b6_estado_observacion"
+
+    col_trab = "b2_trabajadores_flag_tiene_trabajadores"
+    col_est = "b3_establecimientos_flag_tiene_establecimientos"
+    col_estado_final = "b1_b2_estado_contribuyente_final"
+    col_cond_final = "b1_b2_condicion_contribuyente_final"
+    col_ssco_empresa = "b5_ssco_flag_empresa"
+    col_ssco_rep = "b5_ssco_flag_representante_legal"
+
+    def _serie_texto(nombre_columna: str) -> pd.Series:
+        if nombre_columna not in base_bi.columns:
+            return pd.Series([""] * len(base_bi), index=base_bi.index)
+        return base_bi[nombre_columna].fillna("").astype(str).str.strip().str.upper()
+
+    trabajadores = _serie_texto(col_trab)
+    establecimientos = _serie_texto(col_est)
+    estado_final = _serie_texto(col_estado_final)
+    condicion_final = _serie_texto(col_cond_final)
+    ssco_empresa = _serie_texto(col_ssco_empresa)
+    ssco_rep = _serie_texto(col_ssco_rep)
+
+    # CAPA 1
+    base_bi[col_obs] = "Sin observacion"
+    riesgo_capa_1 = (
+        ((trabajadores == "NO") & (establecimientos == "NO"))
+        | (estado_final != "ACTIVO")
+        | (condicion_final != "HABIDO")
+    )
+    base_bi.loc[riesgo_capa_1, col_obs] = "Con riesgo de capacidad operativa"
+
+    # CAPA 2: SSCO directo (prioridad maxima)
+    ssco_directo = ssco_empresa == "SI"
+    base_bi.loc[ssco_directo, col_obs] = "Sujetos sin capacidad operativa"
+
+    # CAPA 3: representante legal SSCO (si no fue SSCO directo)
+    riesgo_rep_ssco = (ssco_rep == "SI") & (~ssco_directo)
+    base_bi.loc[riesgo_rep_ssco, col_obs] = "Con riesgo de capacidad operativa"
+
+    return base_bi
+
+
 def construir_base_bi_basica(
     carpeta_output: str,
     nombre_archivo: str = "base_bi.xlsx",
@@ -425,6 +532,7 @@ def construir_base_bi_basica(
     df_general_join = _preparar_join_directo(df_general, "b2_general_")
     base_bi = base_bi.merge(df_general_join, on="_join_ruc", how="left")
     base_bi = _consolidar_estado_condicion_contribuyente(base_bi)
+    base_bi = _agregar_abreviatura_tipo_contribuyente(base_bi)
 
     # Left join 3: base_rucs <- sunat_ruc_individual.xlsx (Trabajadores, promedio por RUC)
     df_trabajadores = _leer_hoja_si_existe(ruta_datos_ruc, "Trabajadores")
@@ -460,6 +568,7 @@ def construir_base_bi_basica(
         col_b0_ruc,
         valores_ssco,
     )
+    base_bi = _agregar_estado_observacion(base_bi)
 
     base_bi = base_bi.drop(columns=["_join_ruc"])
     columnas_ordenadas = [col_b0_ruc] + [c for c in base_bi.columns if c != col_b0_ruc]
