@@ -6,9 +6,10 @@ UI principal de SUNAT Analytics
 import os
 import time
 import queue
-import subprocess
 import sys
 import threading
+import importlib.util
+import contextlib
 from datetime import datetime
 from pathlib import Path
 
@@ -33,27 +34,45 @@ from src.processors import construir_base_bi_basica, ejecutar_pipeline_sunat # >
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
-PW_ORANGE  = "#E0301E"
-PW_ORANGE2 = "#FF5147"
-PW_SLATE   = "#1E293B"
-PW_GRAY    = "#F1F5F9"
-PW_BORDER  = "#E2E8F0"
-PW_TEXT    = "#1E293B"
-PW_MUTED   = "#64748B"
-PW_GREEN   = "#15803D"
-PW_RED     = "#B91C1C"
-PW_AMBER   = "#B45309"
+PW_ORANGE  = "#FF5A00"
+PW_ORANGE2 = "#F65A00"
+PW_SLATE   = "#F4DFD4"
+PW_GRAY    = "#E8CFC3"
+PW_BORDER  = "#D9D9D9"
+PW_TEXT    = "#111111"
+PW_MUTED   = "#6B6B6B"
+PW_GREEN   = "#1F7A3D"
+PW_RED     = "#B42318"
+PW_AMBER   = "#D97706"
 PW_WHITE   = "#FFFFFF"
 PW_CARD    = "#FFFFFF"
-PW_ACCENT  = "#F8FAFC"
+PW_ACCENT  = "#FFF6F2"
 
-FONT_TITLE = ("Segoe UI", 13, "bold")
-FONT_BODY  = ("Segoe UI", 11)
-FONT_SMALL = ("Segoe UI", 10)
-FONT_TINY  = ("Segoe UI", 9)
-FONT_KPI   = ("Segoe UI", 24, "bold")
-FONT_STEP  = ("Segoe UI", 11, "bold")
+FONT_TITLE = ("Cambria", 15, "bold")
+FONT_BODY  = ("Segoe UI", 12)
+FONT_SMALL = ("Segoe UI", 11)
+FONT_TINY  = ("Segoe UI", 10)
+FONT_KPI   = ("Segoe UI", 26, "bold")
+FONT_STEP  = ("Segoe UI", 12, "bold")
 FONT_MONO  = ("Consolas", 9)
+
+
+def get_runtime_root() -> Path:
+    """Return the folder where resources should be resolved at runtime.
+
+    When running as a PyInstaller executable, use the executable directory.
+    During development, use the project directory where app.py lives.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def get_bundle_root() -> Path:
+    """Return the PyInstaller extraction dir when frozen, else project root."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(getattr(sys, "_MEIPASS"))
+    return Path(__file__).resolve().parent
 
 
 class SunatApp(ctk.CTk):
@@ -72,7 +91,9 @@ class SunatApp(ctk.CTk):
         self._thread = None
         self._stop   = False
         self._kpi    = {}
-        self._legacy_proc = None
+        self._manual_pipe_keys = {"s5", "s6"}
+        self._active_run_mode = "full"
+        self._active_run_label = "Flujo principal"
 
         self.v_input  = tk.StringVar(value=str(Path("input/txt_files").resolve()))
         self.v_output = tk.StringVar(value=str(Path("output/excel").resolve()))
@@ -103,13 +124,15 @@ class SunatApp(ctk.CTk):
     #  HEADER
     # ──────────────────────────────────────────
     def _header(self):
-        # Fondo oscuro tipo slate con franja inferior naranja
-        outer = ctk.CTkFrame(self, fg_color=PW_SLATE, height=88, corner_radius=0)
+        # Header corporativo claro con acento naranja
+        outer = ctk.CTkFrame(self, fg_color=PW_SLATE, height=104, corner_radius=0)
         outer.pack(fill="x")
         outer.pack_propagate(False)
 
-        # Franja naranja inferior
-        bar = ctk.CTkFrame(outer, fg_color=PW_ORANGE, height=3, corner_radius=0)
+        top_bar = ctk.CTkFrame(outer, fg_color=PW_ORANGE, height=10, corner_radius=0)
+        top_bar.pack(side="top", fill="x")
+
+        bar = ctk.CTkFrame(outer, fg_color="#F3B38B", height=2, corner_radius=0)
         bar.pack(side="bottom", fill="x")
 
         inner = ctk.CTkFrame(outer, fg_color="transparent")
@@ -123,14 +146,14 @@ class SunatApp(ctk.CTk):
         top_row.pack(anchor="w")
 
         # Brand en bloque
-        brand_pill = ctk.CTkFrame(top_row, fg_color=BRAND_COLOR_HEX, corner_radius=6)
+        brand_pill = ctk.CTkFrame(top_row, fg_color=BRAND_COLOR_HEX, corner_radius=8)
         brand_pill.pack(side="left", padx=(0, 14))
         ctk.CTkLabel(brand_pill, text=BRAND_NAME,
-                     font=("Segoe UI", 20, "bold"),
+                 font=("Segoe UI", 22, "bold"),
                      text_color=PW_WHITE).pack(padx=10, pady=3)
 
         # Separador vertical
-        sep = ctk.CTkFrame(top_row, fg_color="#334155", width=1)
+        sep = ctk.CTkFrame(top_row, fg_color=PW_BORDER, width=1)
         sep.pack(side="left", fill="y", pady=2)
 
         # Titulo + subtitulo
@@ -138,16 +161,16 @@ class SunatApp(ctk.CTk):
         title_block.pack(side="left", padx=(14, 0))
 
         ctk.CTkLabel(title_block, text=MAIN_TITLE,
-                     font=("Segoe UI", 18, "bold"),
-                     text_color=PW_WHITE).pack(anchor="w")
+                     font=("Cambria", 23, "bold"),
+                     text_color=PW_TEXT).pack(anchor="w")
 
         sub_row = ctk.CTkFrame(title_block, fg_color="transparent")
         sub_row.pack(anchor="w")
 
         ctk.CTkLabel(sub_row, text=SUBTITLE,
-                     font=FONT_SMALL, text_color="#94A3B8").pack(side="left")
+                     font=FONT_SMALL, text_color=PW_MUTED).pack(side="left")
 
-        pill = ctk.CTkFrame(sub_row, fg_color="#0F172A", corner_radius=4)
+        pill = ctk.CTkFrame(sub_row, fg_color="#FFF1EA", corner_radius=4)
         pill.pack(side="left", padx=(8, 0))
         ctk.CTkLabel(pill, text=self.VERSION,
                      font=FONT_TINY, text_color=PW_ORANGE).pack(padx=6, pady=1)
@@ -155,28 +178,41 @@ class SunatApp(ctk.CTk):
         # Descripcion debajo del titulo
         ctk.CTkLabel(brand,
                      text=TAGLINE,
-                     font=FONT_TINY, text_color="#475569").pack(anchor="w", pady=(5, 0))
+                     font=FONT_TINY, text_color=PW_MUTED).pack(anchor="w", pady=(5, 0))
 
         # ── Lado derecho: estado ──
-        right_info = ctk.CTkFrame(inner, fg_color="transparent")
-        right_info.pack(side="right", anchor="e", pady=14)
+        right_info = ctk.CTkFrame(inner, fg_color="transparent", width=180)
+        right_info.pack(side="right", anchor="e", pady=10)
+        right_info.pack_propagate(False)
 
         # Indicador de estado con punto de color
-        status_row = ctk.CTkFrame(right_info, fg_color="#0F172A", corner_radius=8)
+        status_row = ctk.CTkFrame(
+            right_info,
+            fg_color="#FFF5EF",
+            corner_radius=8,
+            border_width=1,
+            border_color=PW_BORDER,
+        )
         status_row.pack(anchor="e")
 
         self._dot_status = ctk.CTkLabel(status_row, text="●",
-                                        font=("Segoe UI", 11), text_color="#475569")
-        self._dot_status.pack(side="left", padx=(10, 4), pady=6)
+                                        font=("Segoe UI", 10), text_color=PW_MUTED)
+        self._dot_status.pack(side="left", padx=(8, 3), pady=4)
 
         self._lbl_status_header = ctk.CTkLabel(
             status_row, text="En espera",
-            font=("Segoe UI", 10, "bold"), text_color="#94A3B8")
-        self._lbl_status_header.pack(side="left", padx=(0, 10), pady=6)
+            font=("Segoe UI", 10, "bold"), text_color=PW_MUTED)
+        self._lbl_status_header.pack(side="left", padx=(0, 8), pady=4)
 
-        ctk.CTkLabel(right_info,
-                     text=STATUS_DESCRIPTION,
-                     font=FONT_TINY, text_color="#334155").pack(anchor="e", pady=(6, 0))
+        ctk.CTkLabel(
+            right_info,
+            text=STATUS_DESCRIPTION,
+            font=FONT_TINY,
+            text_color=PW_MUTED,
+            justify="right",
+            anchor="e",
+            wraplength=210,
+        ).pack(anchor="e", pady=(4, 0))
 
     # ──────────────────────────────────────────
     #  PANEL IZQUIERDO
@@ -192,8 +228,8 @@ class SunatApp(ctk.CTk):
         r1 = ctk.CTkFrame(scrl, fg_color="transparent")
         r1.pack(fill="x")
         ctk.CTkEntry(r1, textvariable=self.v_input,
-                     font=FONT_BODY, height=36).pack(side="left", fill="x", expand=True, padx=(0, 6))
-        ctk.CTkButton(r1, text="Buscar", width=70, height=36,
+                     font=FONT_BODY, height=40).pack(side="left", fill="x", expand=True, padx=(0, 6))
+        ctk.CTkButton(r1, text="Buscar", width=80, height=40,
                       fg_color=PW_ORANGE, hover_color=PW_ORANGE2,
                       font=FONT_SMALL, command=self._pick_input).pack(side="left")
 
@@ -206,8 +242,8 @@ class SunatApp(ctk.CTk):
         r2 = ctk.CTkFrame(scrl, fg_color="transparent")
         r2.pack(fill="x")
         ctk.CTkEntry(r2, textvariable=self.v_output,
-                     font=FONT_BODY, height=36).pack(side="left", fill="x", expand=True, padx=(0, 6))
-        ctk.CTkButton(r2, text="Buscar", width=70, height=36,
+                     font=FONT_BODY, height=40).pack(side="left", fill="x", expand=True, padx=(0, 6))
+        ctk.CTkButton(r2, text="Buscar", width=80, height=40,
                       fg_color=PW_ORANGE, hover_color=PW_ORANGE2,
                       font=FONT_SMALL, command=self._pick_output).pack(side="left")
 
@@ -215,46 +251,100 @@ class SunatApp(ctk.CTk):
 
         # Acciones
         self._section_title(scrl, "Acciones")
+        action_card = ctk.CTkFrame(
+            scrl,
+            fg_color=PW_ACCENT,
+            corner_radius=10,
+            border_width=1,
+            border_color=PW_BORDER,
+        )
+        action_card.pack(fill="x", pady=(0, 4))
+
+        ctk.CTkLabel(
+            action_card,
+            text="Flujo recomendado",
+            font=FONT_SMALL,
+            text_color=PW_TEXT,
+        ).pack(anchor="w", padx=12, pady=(10, 2))
 
         self._btn_run = ctk.CTkButton(
-            scrl, text="Iniciar proceso completo",
-            height=46, font=("Segoe UI", 12, "bold"),
-            fg_color=PW_GREEN, hover_color="#166534",
+            action_card, text="Ejecutar flujo completo",
+            height=44, font=("Segoe UI", 13, "bold"),
+            fg_color=PW_ORANGE, hover_color=PW_ORANGE2,
+            text_color=PW_WHITE,
             command=self._start)
-        self._btn_run.pack(fill="x", pady=(0, 8))
+        self._btn_run.pack(fill="x", padx=12, pady=(0, 10))
 
-        self._btn_stop = ctk.CTkButton(
-            scrl, text="Detener proceso",
-            height=36, font=FONT_BODY,
-            fg_color="#F1F5F9", hover_color="#E2E8F0",
-            text_color=PW_RED, border_width=1, border_color=PW_RED,
-            command=self._request_stop)
-        self._btn_stop.pack(fill="x")
+        ctk.CTkLabel(
+            action_card,
+            text="Ejecucion paso a paso",
+            font=FONT_SMALL,
+            text_color=PW_TEXT,
+        ).pack(anchor="w", padx=12, pady=(0, 6))
+
+        step_grid = ctk.CTkFrame(action_card, fg_color="transparent")
+        step_grid.pack(fill="x", padx=12)
+        step_grid.columnconfigure((0, 1), weight=1, uniform="steps")
+
+        self._btn_txt = ctk.CTkButton(
+            step_grid, text="1) RUC unico + consolidado TXT",
+            height=38, font=FONT_SMALL,
+            fg_color="#EFEFEF", hover_color="#E4E4E4",
+            text_color=PW_TEXT,
+            command=self._start_txt_block)
+        self._btn_txt.grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=(0, 6))
+
+        self._btn_individual = ctk.CTkButton(
+            step_grid, text="2) SUNAT RUC individual",
+            height=38, font=FONT_SMALL,
+            fg_color="#EFEFEF", hover_color="#E4E4E4",
+            text_color=PW_TEXT,
+            command=self._start_individual_block)
+        self._btn_individual.grid(row=0, column=1, sticky="ew", padx=(4, 0), pady=(0, 6))
+
+        self._btn_ssco = ctk.CTkButton(
+            step_grid, text="3) Padron SSCO",
+            height=38, font=FONT_SMALL,
+            fg_color="#EFEFEF", hover_color="#E4E4E4",
+            text_color=PW_TEXT,
+            command=self._start_ssco_block)
+        self._btn_ssco.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(0, 6))
 
         self._btn_legacy = ctk.CTkButton(
-            scrl, text="Abrir bot legacy",
-            height=36, font=FONT_BODY,
-            fg_color="#E2E8F0", hover_color="#CBD5E1",
+            step_grid, text="4) SUNAT masivo",
+            height=38, font=FONT_SMALL,
+            fg_color="#EFEFEF", hover_color="#E4E4E4",
             text_color=PW_TEXT,
             command=self._launch_legacy_bot)
-        self._btn_legacy.pack(fill="x", pady=(8, 0))
+        self._btn_legacy.grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(0, 6))
 
         self._btn_bi = ctk.CTkButton(
-            scrl, text="Generar base BI",
-            height=36, font=FONT_BODY,
-            fg_color="#E2E8F0", hover_color="#CBD5E1",
+            action_card, text="5) Generar base BI",
+            height=38, font=FONT_SMALL,
+            fg_color="#EFEFEF", hover_color="#E4E4E4",
             text_color=PW_TEXT,
             command=self._build_bi_base)
-        self._btn_bi.pack(fill="x", pady=(8, 0))
+        self._btn_bi.pack(fill="x", padx=12, pady=(0, 8))
+
+        self._btn_stop = ctk.CTkButton(
+            action_card, text="Detener proceso",
+            height=36, font=FONT_SMALL,
+            fg_color="#FAFAFA", hover_color="#F1F1F1",
+            text_color=PW_RED, border_width=1, border_color=PW_RED,
+            command=self._request_stop)
+        self._btn_stop.pack(fill="x", padx=12, pady=(0, 10))
 
         self._divider(scrl)
 
         # Archivos que se generaran (compacto)
         self._section_title(scrl, "Archivos que se generaran")
         outputs = [
-            ("rucs_unicos.xlsx",                    "Listado único de RUCs para consulta masiva"),
-            ("sunat_ruc_individual.xlsx",            "Representantes, Trabajadores, Establecimientos, Información Historica (Razón Social - Condición - Domicilio)"),
-            ("sunat_ssco.xlsx",                      "Padron SSCO completo"),
+            ("rucs_unicos.xlsx", "Listado unico de RUCs para consulta"),
+            ("consolidado_txt.xlsx", "Consolidado transaccional desde TXT (801/804)"),
+            ("sunat_ruc_individual.xlsx", "Hojas individuales de SUNAT (incluye historicos)"),
+            ("sunat_ssco.xlsx", "Padron SSCO completo"),
+            ("sunat_ruc_masivo.xlsx", "Resultado del flujo SUNAT masivo (paso manual)"),
+            ("base_bi.xlsx", "Modelo BI con hojas base_bi y consolidado_txt_bi"),
         ]
         for fname, desc in outputs:
             row = ctk.CTkFrame(scrl, fg_color=PW_ACCENT, corner_radius=6)
@@ -335,17 +425,20 @@ class SunatApp(ctk.CTk):
 
         pipe_row = ctk.CTkFrame(p, fg_color="transparent")
         pipe_row.pack(fill="x")
-        pipe_row.columnconfigure((0, 2, 4, 6, 8, 10), weight=1, uniform="pipe")
 
         self._pipe_items = {}
         steps = [
             ("s1", "Lectura TXT"),
-            ("s2", "Extraccion RUCs"),
-            ("s3", "Warmup"),
-            ("s4", "Consulta RUC"),
-            ("s5", "Padron SSCO"),
-            ("s6", "Exportacion Excel"),
+            ("s2", "RUC unico + consolidado TXT"),
+            ("s3", "Extraccion SUNAT RUC individual"),
+            ("s4", "Extraccion SSCO"),
+            ("s5", "Extraccion SUNAT masivo"),
+            ("s6", "Base BI"),
         ]
+
+        pipe_columns = tuple(range(0, len(steps) * 2 - 1, 2))
+        pipe_row.columnconfigure(pipe_columns, weight=1, uniform="pipe")
+
         for i, (key, label) in enumerate(steps):
             row = ctk.CTkFrame(pipe_row, fg_color=PW_ACCENT, corner_radius=999,
                                border_width=1, border_color=PW_BORDER)
@@ -359,7 +452,7 @@ class SunatApp(ctk.CTk):
                                text_color=PW_MUTED, anchor="w")
             txt.pack(side="left", padx=(0, 4), pady=5)
 
-            st = ctk.CTkLabel(row, text="", font=("Segoe UI", 9, "bold"),
+            st = ctk.CTkLabel(row, text="", font=("Segoe UI", 10, "bold"),
                               text_color=PW_MUTED)
             st.pack(side="left", padx=(0, 8), pady=5)
 
@@ -370,7 +463,7 @@ class SunatApp(ctk.CTk):
                              text_color=PW_BORDER).grid(row=0, column=i * 2 + 1, padx=2)
 
         # Log (ocupa todo el ancho disponible)
-        log_card = ctk.CTkFrame(bottom, fg_color="#0F172A", corner_radius=12)
+        log_card = ctk.CTkFrame(bottom, fg_color="#1B1B1B", corner_radius=12)
         log_card.pack(fill="both", expand=True)
 
         log_top = ctk.CTkFrame(log_card, fg_color="transparent")
@@ -378,14 +471,14 @@ class SunatApp(ctk.CTk):
 
         ctk.CTkLabel(log_top, text="Registro de actividad",
                      font=("Segoe UI", 11, "bold"),
-                     text_color="#CBD5E1").pack(side="left")
+                     text_color="#E7E7E7").pack(side="left")
         ctk.CTkButton(log_top, text="Limpiar", width=58, height=22,
-                      font=FONT_TINY, fg_color="#1E293B",
-                      hover_color="#334155", text_color="#94A3B8",
+                      font=FONT_TINY, fg_color="#2A2A2A",
+                      hover_color="#3A3A3A", text_color="#CFCFCF",
                       command=lambda: self._log_txt.delete("1.0", tk.END)).pack(side="right")
 
         self._log_txt = scrolledtext.ScrolledText(
-            log_card, font=FONT_MONO, bg="#0F172A", fg="#94A3B8",
+            log_card, font=FONT_MONO, bg="#1B1B1B", fg="#CFCFCF",
             insertbackground="white", borderwidth=0,
             highlightthickness=0, wrap="word")
         self._log_txt.pack(fill="both", expand=True, padx=14, pady=(0, 12))
@@ -428,6 +521,18 @@ class SunatApp(ctk.CTk):
             self.v_output.set(d)
 
     def _start(self):
+        self._start_pipeline(mode="full")
+
+    def _start_txt_block(self):
+        self._start_pipeline(mode="txt")
+
+    def _start_individual_block(self):
+        self._start_pipeline(mode="individual")
+
+    def _start_ssco_block(self):
+        self._start_pipeline(mode="ssco")
+
+    def _start_pipeline(self, mode):
         if self._thread and self._thread.is_alive():
             messagebox.showwarning("En ejecucion", "Ya hay un proceso en curso.")
             return
@@ -435,12 +540,30 @@ class SunatApp(ctk.CTk):
         inp = self.v_input.get().strip()
         out = self.v_output.get().strip()
 
-        if not inp or not os.path.isdir(inp):
+        mode_labels = {
+            "full": "Flujo completo",
+            "txt": "Paso 1-2: TXT + consolidado",
+            "individual": "Paso 3: SUNAT RUC individual",
+            "ssco": "Paso 4: SSCO",
+        }
+
+        if mode not in mode_labels:
+            messagebox.showerror("Error", "Modo de ejecucion no reconocido.")
+            return
+
+        needs_input = mode in ("full", "txt")
+        if needs_input and (not inp or not os.path.isdir(inp)):
             messagebox.showerror("Error", "La carpeta de entrada no es valida.")
             return
 
+        if not out or not os.path.isdir(out):
+            messagebox.showerror("Error", "La carpeta de salida no es valida.")
+            return
+
+        self._active_run_mode = mode
+        self._active_run_label = mode_labels[mode]
         self._stop = False
-        self._lbl_status.configure(text="Ejecutando...", text_color=PW_AMBER)
+        self._lbl_status.configure(text=f"Ejecutando: {self._active_run_label}", text_color=PW_AMBER)
         self._lbl_status_header.configure(text="Ejecutando...", text_color=PW_AMBER)
         self._dot_status.configure(text_color=PW_AMBER)
         self._progress.set(0)
@@ -450,8 +573,15 @@ class SunatApp(ctk.CTk):
             self._set_kpi(k, "0")
         self._reset_pipe()
 
+        if mode in ("individual", "ssco"):
+            self._log(
+                "[INFO] Modo incremental: se usaran archivos existentes en carpeta de salida cuando aplique.",
+                "info",
+            )
+
+        inp_for_mode = inp if needs_input else None
         self._thread = threading.Thread(
-            target=self._run, args=(inp, out), daemon=True)
+            target=self._run, args=(mode, inp_for_mode, out), daemon=True)
         self._thread.start()
 
     def _request_stop(self):
@@ -459,66 +589,47 @@ class SunatApp(ctk.CTk):
         self._log("[STOP] Detencion solicitada por el usuario.", "warn")
 
     def _launch_legacy_bot(self):
-        repo_root = Path(__file__).resolve().parent
-        legacy_bot = repo_root / "tools" / "legacy" / "bot.py"
-        excel_path = Path(self.v_output.get().strip()) / "rucs_unicos.xlsx"
-
-        if not legacy_bot.exists():
-            messagebox.showerror("Error", f"No se encontro el bot legacy en:\n{legacy_bot}")
+        if self._thread and self._thread.is_alive():
+            messagebox.showwarning("En ejecucion", "Espera a que termine el proceso actual.")
             return
 
-        if not excel_path.exists():
-            messagebox.showerror("Error", f"No se encontro el Excel esperado en:\n{excel_path}")
+        out = self.v_output.get().strip()
+        if not out or not os.path.isdir(out):
+            messagebox.showerror("Error", "La carpeta de salida no es valida.")
             return
 
-        try:
-            kwargs = {
-                "cwd": str(repo_root),
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.STDOUT,
-                "text": True,
-                "bufsize": 1,
-            }
-            if os.name == "nt":
-                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        def _worker():
+            try:
+                self._run_sunat_masivo_block_sync(out)
+            except Exception as exc:
+                self._pipe_state("s5", "error")
+                self._log(f"[ERROR] No se pudo ejecutar SUNAT masivo: {exc}", "error")
 
-            self._legacy_proc = subprocess.Popen([
-                sys.executable,
-                str(legacy_bot),
-                "--excel-path",
-                str(excel_path),
-                "--project-name",
-                "sunat_ruc_masivo_temp",
-            ], **kwargs)
+        threading.Thread(target=_worker, daemon=True).start()
 
-            self._log("[INFO] Bot legacy lanzado en proceso separado.", "info")
-            self._log("[INFO] Capturando salida del bot legacy en tiempo real...", "info")
+    def _load_legacy_runner(self):
+        """Load ejecutar_modo_automatico from legacy bot, from source or bundled data."""
+        candidates = [
+            get_runtime_root() / "tools" / "legacy" / "bot.py",
+            get_bundle_root() / "tools" / "legacy" / "bot.py",
+        ]
 
-            threading.Thread(
-                target=self._read_legacy_output,
-                daemon=True,
-            ).start()
-        except Exception as exc:
-            messagebox.showerror("Error", f"No se pudo abrir el bot legacy:\n{exc}")
+        legacy_file = next((p for p in candidates if p.exists()), None)
+        if legacy_file is None:
+            raise FileNotFoundError(
+                "No se encontro tools/legacy/bot.py en runtime ni en bundle PyInstaller"
+            )
 
-    def _read_legacy_output(self):
-        proc = self._legacy_proc
-        if proc is None or proc.stdout is None:
-            return
+        spec = importlib.util.spec_from_file_location("legacy_bot_runtime", legacy_file)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"No se pudo cargar el modulo legacy desde: {legacy_file}")
 
-        try:
-            for raw_line in proc.stdout:
-                line = raw_line.rstrip()
-                if line:
-                    self._log(f"[LEGACY] {line}", "info")
-
-            return_code = proc.wait()
-            if return_code == 0:
-                self._log("[INFO] Bot legacy finalizo correctamente.", "ok")
-            else:
-                self._log(f"[WARN] Bot legacy termino con codigo {return_code}.", "warn")
-        except Exception as exc:
-            self._log(f"[WARN] No se pudo leer la salida del bot legacy: {exc}", "warn")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        runner = getattr(module, "ejecutar_modo_automatico", None)
+        if runner is None:
+            raise RuntimeError("No se encontro ejecutar_modo_automatico en bot.py")
+        return runner
 
     def _build_bi_base(self):
         if self._thread and self._thread.is_alive():
@@ -530,6 +641,7 @@ class SunatApp(ctk.CTk):
             messagebox.showerror("Error", "La carpeta de salida no es valida.")
             return
 
+        self._pipe_state("s6", "running")
         try:
             self._log("[INFO] Generando base_bi.xlsx desde rucs_unicos.xlsx, consolidado_txt.xlsx, sunat_ruc_individual.xlsx y sunat_ruc_masivo.xlsx...", "info")
             resumen = construir_base_bi_basica(out)
@@ -537,34 +649,101 @@ class SunatApp(ctk.CTk):
                 f"[OK] Base BI generada: {resumen['archivo_salida']} | RUCs: {resumen['total_rucs']} | Coincidencias: {resumen['coincidencias_correctos']}",
                 "ok",
             )
+            self._pipe_state("s6", "ok")
             messagebox.showinfo("Base BI", "base_bi.xlsx generado correctamente.")
         except Exception as exc:
+            self._pipe_state("s6", "error")
             self._log(f"[ERROR] No se pudo generar la base BI: {exc}", "error")
             messagebox.showerror("Error", f"No se pudo generar base_bi.xlsx:\n{exc}")
+
+    def _run_sunat_masivo_block_sync(self, out):
+        excel_path = Path(out) / "rucs_unicos.xlsx"
+
+        self._pipe_state("s5", "running")
+        self._log("[INFO] Iniciando flujo SUNAT masivo...", "info")
+
+        if not excel_path.exists():
+            self._pipe_state("s5", "warn")
+            raise FileNotFoundError(f"No se encontro el Excel esperado en: {excel_path}")
+
+        runner = self._load_legacy_runner()
+
+        class _LogWriter:
+            def __init__(self, push_log):
+                self._push_log = push_log
+                self._buf = ""
+
+            def write(self, data):
+                if not data:
+                    return
+                self._buf += data
+                while "\n" in self._buf:
+                    line, self._buf = self._buf.split("\n", 1)
+                    line = line.strip()
+                    if line:
+                        self._push_log(f"[MASIVO] {line}", "info")
+
+            def flush(self):
+                line = self._buf.strip()
+                if line:
+                    self._push_log(f"[MASIVO] {line}", "info")
+                self._buf = ""
+
+        writer = _LogWriter(self._log)
+        with contextlib.redirect_stdout(writer), contextlib.redirect_stderr(writer):
+            ok = runner(str(excel_path), "sunat_ruc_masivo_temp")
+        writer.flush()
+
+        if ok:
+            self._pipe_state("s5", "ok")
+            self._log("[OK] Flujo SUNAT masivo finalizo correctamente.", "ok")
+        else:
+            self._pipe_state("s5", "warn")
+            raise RuntimeError("SUNAT masivo devolvio estado no satisfactorio")
 
     # ══════════════════════════════════════════
     #  PIPELINE DE EJECUCION
     # ══════════════════════════════════════════
-    def _run(self, inp, out):
+    def _run(self, mode, inp, out):
         t0 = time.time()
         try:
+            mode_flags = {
+                "full": dict(run_txt_block=True, run_individual_block=True, run_ssco_block=True),
+                "txt": dict(run_txt_block=True, run_individual_block=False, run_ssco_block=False),
+                "individual": dict(run_txt_block=False, run_individual_block=True, run_ssco_block=False),
+                "ssco": dict(run_txt_block=False, run_individual_block=False, run_ssco_block=True),
+            }
+
             resultado = ejecutar_pipeline_sunat(
                 carpeta_txt=inp,
                 carpeta_output=out,
                 exportar_excel=True,
                 emit=lambda *event: self._q.put(event),
                 should_stop=lambda: self._stop,
+                **mode_flags.get(mode, mode_flags["full"]),
             )
 
             if resultado["status"] in ("stopped", "no_data"):
                 self._finish(False)
                 return
 
+            if mode == "full":
+                self._run_sunat_masivo_block_sync(out)
+
+                self._pipe_state("s6", "running")
+                self._log("[INFO] Generando base BI al final del flujo completo...", "info")
+                resumen = construir_base_bi_basica(out)
+                self._pipe_state("s6", "ok")
+                self._log(
+                    f"[OK] Base BI generada: {resumen['archivo_salida']} | RUCs: {resumen['total_rucs']} | Coincidencias: {resumen['coincidencias_correctos']}",
+                    "ok",
+                )
+
             elapsed = time.time() - t0
             mins = int(elapsed // 60)
             secs = int(elapsed % 60)
             self._log(
-                f"[DONE] Proceso completado en {mins}m {secs}s  |  "
+                f"[DONE] {self._active_run_label} completado en {mins}m {secs}s  |  "
                 f"Correctas: {resultado['ok_count']}  |  Sin datos o error: {resultado['error_count']}",
                 "ok",
             )
@@ -595,7 +774,10 @@ class SunatApp(ctk.CTk):
         for key, (dot, txt, label, st) in self._pipe_items.items():
             dot.configure(text_color=PW_BORDER)
             txt.configure(text=label, text_color=PW_MUTED)
-            st.configure(text="", text_color=PW_MUTED)
+            if key in self._manual_pipe_keys:
+                st.configure(text="MANUAL", text_color=PW_MUTED)
+            else:
+                st.configure(text="", text_color=PW_MUTED)
 
     def _poll(self):
         try:
@@ -621,15 +803,18 @@ class SunatApp(ctk.CTk):
                     key, state = msg[1], msg[2]
                     dot, txt, label, st = self._pipe_items[key]
                     c_map = {"running": PW_AMBER, "ok": PW_GREEN,
-                             "warn": PW_AMBER,    "error": PW_RED}
+                             "warn": PW_AMBER,    "error": PW_RED,
+                             "manual": PW_MUTED}
                     t_map = {"running": "En progreso",
                              "ok":      "Completado",
                              "warn":    "Con observaciones",
-                             "error":   "Error"}
+                             "error":   "Error",
+                             "manual":  "Manual"}
                     short_map = {"running": "RUN",
                                  "ok":      "OK",
                                  "warn":    "WARN",
-                                 "error":   "ERR"}
+                                 "error":   "ERR",
+                                 "manual":  "MANUAL"}
                     c = c_map.get(state, PW_BORDER)
                     dot.configure(text_color=c)
                     txt.configure(text=label, text_color=c)
@@ -644,18 +829,28 @@ class SunatApp(ctk.CTk):
                         self._lbl_status_header.configure(
                             text="Completado", text_color=PW_GREEN)
                         self._dot_status.configure(text_color=PW_GREEN)
-                        messagebox.showinfo(
-                            "Proceso completado",
-                            "Todos los archivos Excel han sido generados correctamente.")
+                        done_messages = {
+                            "full": "El flujo completo finalizo correctamente.",
+                            "txt": "Bloque TXT completado. Se generaron rucs_unicos.xlsx y consolidado_txt.xlsx.",
+                            "individual": "Bloque RUC individual completado. Se genero sunat_ruc_individual.xlsx.",
+                            "ssco": "Bloque SSCO completado. Se genero sunat_ssco.xlsx.",
+                        }
+                        messagebox.showinfo("Proceso completado", done_messages.get(self._active_run_mode, "Proceso completado correctamente."))
                     else:
                         self._lbl_status.configure(
                             text="Finalizado con observaciones", text_color=PW_RED)
                         self._lbl_status_header.configure(
                             text="Finalizado con observaciones", text_color=PW_RED)
                         self._dot_status.configure(text_color=PW_RED)
+                        warn_messages = {
+                            "full": "El proceso termino con observaciones. Revisa el registro de actividad.",
+                            "txt": "El bloque TXT termino con observaciones. Revisa el registro de actividad.",
+                            "individual": "El bloque RUC individual termino con observaciones. Revisa el registro de actividad.",
+                            "ssco": "El bloque SSCO termino con observaciones. Revisa el registro de actividad.",
+                        }
                         messagebox.showwarning(
                             "Proceso finalizado",
-                            "El proceso termino. Revisa el registro de actividad.")
+                            warn_messages.get(self._active_run_mode, "El proceso termino. Revisa el registro de actividad."))
 
         except queue.Empty:
             pass
@@ -664,7 +859,7 @@ class SunatApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-    app_root = Path(__file__).resolve().parent
+    app_root = get_runtime_root()
     license_bundle_root = app_root / "license_manager"
     license_result = validate_license(
         license_path=license_bundle_root / "license.json",

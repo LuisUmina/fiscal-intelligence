@@ -5,7 +5,6 @@ config/branding.py
 ejecutable.bat
 SUNAT-Analytics_v4.exe
 *.exe
-*.bat
 
 # Datos de entrada/salida (pruebas internas)
 input/
