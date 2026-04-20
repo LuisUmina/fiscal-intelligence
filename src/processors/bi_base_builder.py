@@ -480,6 +480,53 @@ def _agregar_estado_observacion(base_bi: pd.DataFrame) -> pd.DataFrame:
     return base_bi
 
 
+def _crear_consolidado_txt_bi(
+    df_consolidado_txt: pd.DataFrame,
+    base_bi: pd.DataFrame,
+    col_b0_ruc: str,
+) -> pd.DataFrame:
+    """Crea una vista consolidada (left join) TXT->BI por RUC proveedor."""
+    if df_consolidado_txt.empty:
+        return df_consolidado_txt.copy()
+
+    def _buscar_columna_ruc_proveedor(df: pd.DataFrame) -> str:
+        candidatos = {
+            "numero_ruc_proveedor",
+            "nro_ruc_proveedor",
+            "ruc_proveedor",
+            "ruc proveedor",
+            "numero ruc proveedor",
+        }
+
+        for col in df.columns:
+            normalizada = str(col).strip().lower().replace(" ", "_")
+            if normalizada in {c.replace(" ", "_") for c in candidatos}:
+                return col
+
+        for col in df.columns:
+            normalizada = str(col).strip().lower()
+            if "ruc" in normalizada and "proveedor" in normalizada:
+                return col
+
+        raise ValueError("No se encontro columna de RUC proveedor en consolidado_txt.")
+
+    try:
+        col_ruc_txt = _buscar_columna_ruc_proveedor(df_consolidado_txt)
+    except ValueError:
+        return df_consolidado_txt.copy()
+
+    df_txt = df_consolidado_txt.copy()
+    df_txt["_join_ruc_txt_bi"] = _normalizar_ruc_serie(df_txt[col_ruc_txt])
+
+    df_bi = base_bi.copy()
+    df_bi["_join_ruc_txt_bi"] = _normalizar_ruc_serie(df_bi[col_b0_ruc])
+
+    df_unido = df_txt.merge(df_bi, on="_join_ruc_txt_bi", how="left")
+    df_unido = df_unido.drop(columns=["_join_ruc_txt_bi"])
+
+    return df_unido
+
+
 def construir_base_bi_basica(
     carpeta_output: str,
     nombre_archivo: str = "base_bi.xlsx",
@@ -581,9 +628,12 @@ def construir_base_bi_basica(
         except ValueError:
             df_consolidado_txt = pd.read_excel(ruta_consolidado_txt)
 
+    df_consolidado_txt_bi = _crear_consolidado_txt_bi(df_consolidado_txt, base_bi, col_b0_ruc)
+
     with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
         base_bi.to_excel(writer, sheet_name="base_bi", index=False)
         df_consolidado_txt.to_excel(writer, sheet_name="consolidado_txt", index=False)
+        df_consolidado_txt_bi.to_excel(writer, sheet_name="consolidado_txt_bi", index=False)
 
     col_data = [c for c in base_bi.columns if c != col_b0_ruc]
     coincidencias = int(base_bi[col_data].notna().any(axis=1).sum()) if col_data else 0
